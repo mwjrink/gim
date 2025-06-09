@@ -172,25 +172,24 @@ pub fn write(mesh: &mut Mesh) -> CTree {
             };
 
             println!("Balancing {}...", amount);
-            let mut closest = Vec::new();
-            closest.resize(amount, (0usize, 0usize, f32::MAX));
-            for (rem_idx, triangle_idx) in rem_from_list.iter().enumerate() {
-                let triangle = &mut algo_mesh.triangles[*triangle_idx];
-                let dist = (add_anchor - triangle.anchor).mag_sq();
-                if let Some(element) = closest.iter_mut().find(|close| close.2 > dist) {
-                    element.0 = *triangle_idx;
-                    element.1 = rem_idx;
-                    element.2 = dist;
-                    triangle.taken_by = add_idx;
-                }
-            }
+            // let mut closest = Vec::new();
+            // closest.resize(amount, (0usize, 0usize, f32::MAX));
+            // TODO this might be faster if I cached the distances?
+            //     - takes like a second for lucy (28 mill tris)
+            rem_from_list.sort_by(|a, b| {
+                let a_triangle = &mut algo_mesh.triangles[*a];
+                let a_dist = (add_anchor - a_triangle.anchor).mag_sq();
 
-            closest.sort_by(|a, b| b.1.cmp(&a.1));
-            assert!(closest[0].1 > closest[1].1); // make sure we can swap remove in the correct order
+                let b_triangle = &mut algo_mesh.triangles[*b];
+                let b_dist = (add_anchor - b_triangle.anchor).mag_sq();
 
-            for (triangle_idx, rem_idx, _) in closest {
-                rem_from_list.swap_remove(rem_idx);
-                add_to_list.push(triangle_idx);
+                b_dist.total_cmp(&a_dist)
+            });
+
+            // TODO only take the tris that are edge or hole tris here
+            for rem_idx in rem_from_list.drain((rem_from_list.len() - amount)..rem_from_list.len())
+            {
+                add_to_list.push(rem_idx);
             }
 
             assert_eq!(total, rem_from_list.len() + add_to_list.len());
@@ -202,6 +201,7 @@ pub fn write(mesh: &mut Mesh) -> CTree {
                 imbalance
             );
 
+            // TODO ensure the cut is contiguous here
             rem_from_list.sort_by(|a, b| a.cmp(&b));
             add_to_list.sort_by(|a, b| b.cmp(&a));
             let mut swapped;
@@ -215,16 +215,39 @@ pub fn write(mesh: &mut Mesh) -> CTree {
                     }
                 }
 
+                rem_from_list.sort_by(|a, b| a.cmp(&b));
+                add_to_list.sort_by(|a, b| b.cmp(&a));
+
                 if !swapped {
                     break;
                 }
             }
 
+            println!("rem: {:?}", &rem_from_list[0..10]);
+            println!("add: {:?}", &add_to_list[0..10]);
+
             rem_from_list.sort_by(|a, b| a.cmp(&b));
             add_to_list.sort_by(|a, b| b.cmp(&a));
-            assert!(*add_to_list.last().unwrap() == add_to_list.len() - 1);
-            assert!(*rem_from_list.first().unwrap() == add_to_list.len());
-            assert!(*rem_from_list.last().unwrap() == algo_mesh.triangles.len() - 1);
+            println!(
+                "Should eq: {} {}",
+                *rem_from_list.last().unwrap(),
+                rem_from_list.len()
+            );
+            assert!(*rem_from_list.last().unwrap() == rem_from_list.len());
+
+            println!(
+                "Should eq: {} {}",
+                *add_to_list.first().unwrap(),
+                rem_from_list.len()
+            );
+            assert!(*add_to_list.first().unwrap() == rem_from_list.len());
+
+            println!(
+                "Should eq: {} {}",
+                *add_to_list.last().unwrap(),
+                algo_mesh.triangles.len()
+            );
+            assert!(*add_to_list.last().unwrap() == algo_mesh.triangles.len());
             println!("Done swapping.");
         }
 

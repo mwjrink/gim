@@ -2,30 +2,19 @@ use cmreader::reader;
 use cmwriter::mesh::*;
 use cmwriter::utils::*;
 use cmwriter::writer;
-use tobj::LoadOptions;
-// 3.15 GB (3,390,337,024 bytes)
-
-// So, say an object that is 10 feet tall is 100 feet away. If I hold up a ruler 3 feet away, then the object in the
-// distance would correspond to about how many inches? => x/3 = 10/100
 
 fn main() {
     let obj_file = "./test_assets/bunny/bunny.obj".to_string();
 
-    let (models, materials) = tobj::load_obj(
-        &obj_file,
-        &LoadOptions {
-            single_index: true,
-            triangulate: true,
-            ignore_points: true,
-            ignore_lines: true,
-        },
-    )
-    .expect("Failed to load file");
+    let (models, materials) =
+        tobj::load_obj(&obj_file, &tobj::GPU_LOAD_OPTIONS).expect("Failed to load file");
 
     println!("# of models: {}", models.len());
+
     if let Ok(mats) = materials {
         println!("# of materials: {}", mats.len());
     }
+
     for (i, m) in models.iter().enumerate() {
         let mesh = &m.mesh;
         println!("model[{}].name = \'{}\'", i, m.name);

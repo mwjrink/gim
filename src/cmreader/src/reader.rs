@@ -1,9 +1,8 @@
 use interop::{Cluster, Node};
 use std::fs::File;
-use std::mem;
-use std::io::Seek;
-use std::io;
 use std::io::prelude::*;
+use std::io::Seek;
+use std::mem;
 
 pub struct CTree {
     pub nodes: Vec<Node>,

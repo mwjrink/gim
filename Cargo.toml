@@ -10,6 +10,8 @@ edition = "2021"
 tobj = "3.2.0"
 cmreader = { path = "src/cmreader" }
 cmwriter = { path = "src/cmwriter" }
+interop = { path = "src/interop" }
+ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
 
 # TODO
 # obj => mesh image

@@ -1,7 +1,9 @@
 use interop::{Cluster, Node};
 use std::fs::File;
 use std::mem;
-use std::os::windows::prelude::FileExt;
+use std::io::Seek;
+use std::io;
+use std::io::prelude::*;
 
 pub struct CTree {
     pub nodes: Vec<Node>,
@@ -38,7 +40,7 @@ pub fn read(file_name: &str) -> CTree {
     // println!("Size of Node: {}", mem::size_of::<Node>());
     let nodes: Vec<Node> =
         // unsafe { Vec::from_raw_parts(ptr as *mut Node, nodes_length, nodes_length) };
-        read_vec::<Node>(&read_file, nodes_length, &mut offset);
+        read_vec::<Node>(&mut read_file, nodes_length, &mut offset);
 
     // let mut u32_buff = [0 as u8; mem::size_of::<u32>()];
     // read_file.read_exact(&mut u32_buff).unwrap();
@@ -73,7 +75,7 @@ impl CTree {
         let positions = {
             let positions_length = read_u32_offset(&mut self.file, &mut offset) as usize;
             // println!("positions_length: {}", positions_length);
-            read_vec::<f32>(&self.file, positions_length, &mut offset)
+            read_vec::<f32>(&mut self.file, positions_length, &mut offset)
 
             // let buff_size = mem::size_of::<f32>() * positions_length;
             // let mut buffer = Vec::<u8>::with_capacity(buff_size);
@@ -92,7 +94,7 @@ impl CTree {
         let indices = {
             let indices_length = read_u32_offset(&mut self.file, &mut offset) as usize;
             // println!("indices_length: {}", indices_length);
-            read_vec::<u32>(&self.file, indices_length, &mut offset)
+            read_vec::<u32>(&mut self.file, indices_length, &mut offset)
 
             // let buff_size = mem::size_of::<u32>() * indices_length;
             // let mut buffer = Vec::<u8>::with_capacity(buff_size);
@@ -185,18 +187,20 @@ impl CTree {
 
 fn read_u32_offset(file: &mut File, offset: &mut u64) -> u32 {
     let mut u32_buff = [0 as u8; mem::size_of::<u32>()];
-    file.seek_read(&mut u32_buff, *offset).unwrap();
+    let _ = file.seek(std::io::SeekFrom::Start(*offset));
+    let _ = file.read_exact(&mut u32_buff);
     *offset += mem::size_of::<u32>() as u64;
     u32::from_le_bytes(u32_buff)
 }
 
-fn read_vec<T>(file: &File, length: usize, offset: &mut u64) -> Vec<T> {
+fn read_vec<T>(file: &mut File, length: usize, offset: &mut u64) -> Vec<T> {
     // println!("Size of T: {}", mem::size_of::<T>());
 
     let buff_size = mem::size_of::<T>() * length;
     let mut buffer = Vec::<u8>::with_capacity(buff_size);
     buffer.resize(buff_size, Default::default());
-    file.seek_read(&mut buffer, *offset).unwrap();
+    let _ = file.seek(std::io::SeekFrom::Start(*offset));
+    let _ = file.read_exact(&mut buffer);
     *offset += buff_size as u64;
     let ptr = buffer.as_mut_ptr();
     mem::forget(buffer); // Avoid calling the destructor!

@@ -9,7 +9,7 @@ use tobj::LoadOptions;
 // distance would correspond to about how many inches? => x/3 = 10/100
 
 fn main() {
-    let obj_file = "./test_assets/bunny.obj".to_string();
+    let obj_file = "./test_assets/bunny/bunny.obj".to_string();
 
     let (models, materials) = tobj::load_obj(
         &obj_file,

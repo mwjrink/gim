@@ -15,6 +15,7 @@ const TESTING: bool = false;
 
 const TRIS_IN_CLUSTER: usize = 128;
 
+// TODO add a tri trading step where clusters trade triangles
 pub fn write(mesh: &mut Mesh) -> CTree {
     // create data structure that can be referenced to find which indices are included in which triangles
 
@@ -29,17 +30,6 @@ pub fn write(mesh: &mut Mesh) -> CTree {
     // ?
     // TODO
 
-    //// ANCHOR - Used to indicate a section in your file
-    //// -TODO - An item that is awaiting completion
-    //// FIXME - An item that requires a bugfix
-    //// STUB - Used for generated default snippets
-    //// NOTE - An important note for a specific code section
-    //// REVIEW - An item that requires additional review
-    //// LINK - Used to link to a file that can be opened within the editor (See 'Link Anchors'
-    //// SECTION - Used to define a region (See 'Hierarchical anchors')
-    //// ANCHOR this is in the section, section
-    //// -!SECTION
-
     let (shared_edges, mut ctree, mesh_edge) = split_mesh(&mesh, TRIS_IN_CLUSTER);
 
     // let write_file = File::create("./logs/log").unwrap();
@@ -52,6 +42,7 @@ pub fn write(mesh: &mut Mesh) -> CTree {
 
     // TODO this is called graph partitioning
     // TODO NANITE @Karris: Specifically, we optimize for the number of boundary edges and number of triangles per cluster
+    //     use cluster tri trading here
     // !SECTION - Combine the clusters into a graph
     {
         let mut clusters: Vec<u32> = (0..ctree.len() as u32).collect();

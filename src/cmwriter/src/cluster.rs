@@ -105,9 +105,13 @@ pub fn split_mesh(
         let edge = edges.keys().next().unwrap();
         new_tri(edge[0], edge[1], edges[edge][0])
     };
+    let mut counter = 0;
     while !tris.is_empty() {
+        println!("count: {} seed: {:?}", counter, seed);
+        counter += 1;
         if !tris.remove(&seed) {
-            // println!("seed doesn't exist in 'tris'");
+            let filtered = tris.iter().filter(|tri| { tri.iter().any(|v| { *v == seed[0] || *v == seed[1] || *v == seed[2] }) }).collect::<Vec::<&[u32; 3]>>();
+            println!("seed doesn't exist in tris:[{:?}],\n seed: ({:?})", filtered, seed);
             // break 'cluster_generation;
             panic!("seed doesn't exist in 'tris'");
         }

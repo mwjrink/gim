@@ -1,5 +1,5 @@
 use crate::utils::*;
-use crate::cluster::get_order_accurate_tri;
+use crate::vertex::Vertex;
 use core::panic;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -14,7 +14,7 @@ pub type Point = [f32; 3];
 
 #[derive(Clone)]
 pub struct Mesh {
-    pub positions: Vec<f32>,
+    pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
 }
 
@@ -890,7 +890,7 @@ pub fn generate_data_structures(
             let idx2 = indices[idx + 2];
 
             let tri_idx = tri_list.len();
-            tri_list.push([idx0, idx1, idx2]);
+            tri_list.push(new_tri(idx0, idx1, idx2));
             if let Some(tlist) = vertex_map.get_mut(&idx0) {
                 tlist.insert(tri_idx);
             } else {

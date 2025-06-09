@@ -1,8 +1,13 @@
+use ultraviolet::{Vec2, Vec3};
+
+pub const TESTING: bool = false;
+pub const TRIS_IN_CLUSTER: usize = 128;
+
 #[derive(Clone)]
 #[repr(C)]
 pub struct Cluster {
-    pub pos: Vec<f32>,
-    pub idx: Vec<u32>,
+    pub vertexes: Vec<Vertex>,
+    pub idices: Vec<u32>,
 }
 
 #[repr(C)]
@@ -20,8 +25,7 @@ pub struct Node {
 // blas construction slower in theory
 // though
 pub struct Vertex {
-    pub position: [f32; 3],
-    // pub color:  [f32; 3],
-    pub normal: [f32; 3],
-    pub tex_coords: [f32; 2],
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub tex_coords: Vec2,
 }

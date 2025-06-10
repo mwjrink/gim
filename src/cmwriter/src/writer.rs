@@ -6,6 +6,8 @@ use std::collections::{HashSet, VecDeque};
 use std::{f32, usize};
 use ultraviolet::Vec3;
 
+use crate::debug::dump;
+
 #[derive(Clone, Debug)]
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
@@ -47,8 +49,8 @@ impl CTree {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Triangle {
-    idx: usize,
+pub(crate) struct Triangle {
+    pub(crate) idx: usize,
     taken_by: usize,
     anchor: Vec3,
     // edge1, edge2, implicit_edge
@@ -233,6 +235,16 @@ pub fn write(mesh: &mut Mesh) -> CTree {
     // start splitting
     {
         let mut idx_list: Vec<usize> = (0..algo_mesh.triangles.len()).collect();
+        println!("Dumping...");
+        dump(
+            &mesh.vertices,
+            &mesh.indices,
+            &algo_mesh.triangles,
+            &idx_list,
+            "Base".to_string(),
+        );
+        println!("dumped");
+
         println!("Subdividing...");
         let subsets = subdivide(
             &mesh.indices,
@@ -423,19 +435,23 @@ fn split<'a>(
                         consumed += 1;
                     } else {
                         // Assume we have already looked at this triangle
-                        continue;
+                        // continue;
                     }
 
                     let tri = source[check_idx].as_ref_unchecked();
                     // connections is relative to the SOURCE SOURCE not the specific algo mesh...
                     for connection in &tri.connections {
-                        println!("tri {} is connected to {}", check_idx, connection);
+                        if split_size == 1804800 {
+                            println!("tri {} is connected to {}", check_idx, connection);
+                        }
                         if src_to_split_idx.contains_key(connection) {
                             let connected_tri = source[*connection].as_ref_unchecked();
-                            println!(
-                                "taken_by on connection was: {} looking for {}",
-                                connected_tri.taken_by, idxs.0
-                            );
+                            if split_size == 1804800 {
+                                println!(
+                                    "taken_by on connection was: {} looking for {}",
+                                    connected_tri.taken_by, idxs.0
+                                );
+                            }
                             if connected_tri.taken_by != idxs.0 {
                                 to_check.push_back(*connection);
                             }
@@ -443,6 +459,12 @@ fn split<'a>(
                     }
                 }
             } else {
+                let source = source
+                    .iter()
+                    .map(|v| unsafe { **v.as_ref_unchecked() })
+                    .collect::<Vec<Triangle>>();
+                dump(verts, indices, &source, idx_list, "Broken".to_string());
+
                 panic!(
                     "We ran out of triangles to check! {} => {}",
                     consumed, split_size
@@ -513,6 +535,13 @@ fn split<'a>(
                 tri.as_mut_unchecked().taken_by = idxs.1;
             };
         }
+
+        let source = source
+            .iter()
+            .map(|v| unsafe { **v.as_ref_unchecked() })
+            .collect::<Vec<Triangle>>();
+        dump(verts, indices, &source, split_tris0, idxs.0.to_string());
+        dump(verts, indices, &source, split_tris1, idxs.1.to_string());
 
         let split0 = AlgoMeshSubset {
             idx_list: split_tris0,

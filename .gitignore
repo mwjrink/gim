@@ -8,3 +8,4 @@ input
 perf.*
 flamegraph.svg
 nohup.out
+!debug.rs

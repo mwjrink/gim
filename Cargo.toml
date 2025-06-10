@@ -7,7 +7,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tobj = "3.2.0"
+tobj = { version = "3.2.0", features = ["merging", "reordering"] }
 cmreader = { path = "src/cmreader" }
 cmwriter = { path = "src/cmwriter" }
 interop = { path = "src/interop" }
@@ -16,3 +16,11 @@ ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
 # TODO
 # obj => mesh image
 # multiple images, float.x, float.y, float.z, albedo, roughness/shininess?
+
+[profile.dev.package."*"]
+# Set the default for dependencies in Development mode.
+opt-level = 3
+
+[profile.dev]
+# Turn on a small amount of optimisation in Development mode.
+opt-level = 1

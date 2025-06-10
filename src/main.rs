@@ -3,10 +3,28 @@ use interop::Vertex;
 use ultraviolet::{Vec2, Vec3};
 
 fn main() {
-    let obj_file = "input/lucy/lucy.obj";
+    let obj_file = "input/xyzrgb_dragon/xyzrgb_dragon.obj";
+    // let obj_file = "input/cube.obj";
 
-    let (models, materials) =
-        tobj::load_obj(obj_file, &tobj::GPU_LOAD_OPTIONS).expect("Failed to load file");
+    let (models, materials) = tobj::load_obj(
+        obj_file,
+        &tobj::LoadOptions {
+            reorder_data: false,
+            merge_identical_points: true,
+            single_index: false,
+            triangulate: true,
+            ignore_points: true,
+            ignore_lines: true,
+        },
+    )
+    .expect("Failed to load file");
+    // tobj::GPU_LOAD_OPTIONS
+    // &LoadOptions {
+    //     single_index: true,
+    //     triangulate: true,
+    //     ignore_points: true,
+    //     ignore_lines: true,
+    // },
 
     println!("# of models: {}", models.len());
 
@@ -23,8 +41,16 @@ fn main() {
             mesh.material_id.unwrap_or_else(|| { usize::MAX })
         );
 
-        println!("Tris in model[{}]: {}", i, mesh.face_arities.len());
-        println!("Number of verts: {}", mesh.positions.len());
+        println!("Tris in model[{}]: {}", i, mesh.indices.len() / 3);
+        println!("Number of verts: {}", mesh.positions.len() / 3);
+        println!(
+            "Number of normal_indices: {}",
+            mesh.normal_indices.len() / 3
+        );
+        println!(
+            "Number of texcoord_indices: {}",
+            mesh.texcoord_indices.len() / 3
+        );
 
         let mut vertices = Vec::with_capacity(mesh.positions.len() / 3);
         for _idx in 0..(mesh.positions.len() / 3) {
@@ -35,23 +61,27 @@ fn main() {
                     mesh.positions[idx + 1],
                     mesh.positions[idx + 2],
                 ),
-                normal: Vec3::new(
-                    mesh.normals[idx + 0],
-                    mesh.normals[idx + 1],
-                    mesh.normals[idx + 2],
-                ),
-                tex_coords: Vec2::new(
-                    // -
-                    // mesh.texcoords[idx + 0],
-                    // mesh.texcoords[idx + 1],
-                    0.0,
-                    0.0, // lucy doesn't have a texture, make sure to fix this in the future
-                ),
+                // // need to use mesh.normal_indices to get these
+                // normal: Vec3::new(
+                //     // mesh.normals[idx + 0],
+                //     // mesh.normals[idx + 1],
+                //     // mesh.normals[idx + 2],
+                //     0.0, 0.0, 0.0,
+                // ),
+                // // need to use mesh.texcoord_indices to get these
+                // tex_coords: Vec2::new(
+                //     // -
+                //     // mesh.texcoords[idx + 0],
+                //     // mesh.texcoords[idx + 1],
+                //     0.0,
+                //     0.0, // lucy doesn't have a texture, make sure to fix this in the future
+                // ),
             });
         }
 
         // TODO probably bad cause these could be HUGE, do something else, ...
         // TODO... but that may have to wait for a better asset importer or a switch to gltf2 or usda
+        // TODO drop the tobj loaded mesh here in the console app, in this case, we keep it for testing
         let mut mesh = Mesh {
             vertices: vertices,
             indices: mesh.indices.clone(),

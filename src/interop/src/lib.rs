@@ -26,6 +26,6 @@ pub struct Node {
 // though
 pub struct Vertex {
     pub position: Vec3,
-    pub normal: Vec3,
-    pub tex_coords: Vec2,
+    // pub normal: Vec3,
+    // pub tex_coords: Vec2,
 }

@@ -53,14 +53,9 @@ fn main() {
         );
 
         let mut vertices = Vec::with_capacity(mesh.positions.len() / 3);
-        for _idx in 0..(mesh.positions.len() / 3) {
-            let idx = _idx * 3;
+        for chunk in mesh.positions.chunks(3) {
             vertices.push(Vertex {
-                position: Vec3::new(
-                    mesh.positions[idx + 0],
-                    mesh.positions[idx + 1],
-                    mesh.positions[idx + 2],
-                ),
+                position: Vec3::new(chunk[0], chunk[1], chunk[2]),
                 // // need to use mesh.normal_indices to get these
                 // normal: Vec3::new(
                 //     // mesh.normals[idx + 0],

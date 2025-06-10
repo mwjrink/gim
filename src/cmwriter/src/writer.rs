@@ -2,11 +2,12 @@ use ahash::{HashMap, HashMapExt};
 use interop::TESTING;
 use interop::{Vertex, TRIS_IN_CLUSTER};
 use std::cell::UnsafeCell;
-use std::collections::{HashSet, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashSet, VecDeque};
 use std::{f32, usize};
 use ultraviolet::Vec3;
 
-use crate::debug::dump;
+use crate::debug::{dump, dump_raw};
 
 #[derive(Clone, Debug)]
 pub struct Mesh {
@@ -72,6 +73,8 @@ struct AlgoMeshSubset<'a> {
 pub fn write(mesh: &mut Mesh) -> CTree {
     let mut nodes = Vec::new();
     let mut clusters = Vec::new();
+
+    dump_raw(mesh, "RAW".to_string());
 
     // let mut maximum = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
     // let mut minimum = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
@@ -420,31 +423,35 @@ fn split<'a>(
         // TODO this breaks for non manifold tri pairs...
         // start from the lowest and go through, make sure everything is attached to it in some way
         // let mut settered = 0;
-        let mut to_check = VecDeque::new();
-        to_check.push_back(idx_list[0]);
+        // let mut to_check = VecDeque::new();
+        let mut to_check = BinaryHeap::new();
+        to_check.push(Reverse(0usize));
         let mut consumed = 0;
         loop {
             if consumed == split_size {
                 break;
             }
 
-            if let Some(check_idx) = to_check.pop_back() {
+            if let Some(check_idx) = to_check.pop() {
                 unsafe {
-                    if source[check_idx].as_ref_unchecked().taken_by != idxs.0 {
-                        source[check_idx].as_mut_unchecked().taken_by = idxs.0;
+                    if source[idx_list[check_idx.0]].as_ref_unchecked().taken_by != idxs.0 {
+                        source[idx_list[check_idx.0]].as_mut_unchecked().taken_by = idxs.0;
                         consumed += 1;
                     } else {
                         // Assume we have already looked at this triangle
-                        // continue;
+                        continue;
                     }
 
-                    let tri = source[check_idx].as_ref_unchecked();
+                    let tri = source[idx_list[check_idx.0]].as_ref_unchecked();
                     // connections is relative to the SOURCE SOURCE not the specific algo mesh...
                     for connection in &tri.connections {
                         if split_size == 1804800 {
-                            println!("tri {} is connected to {}", check_idx, connection);
+                            println!(
+                                "tri {} is connected to {}",
+                                idx_list[check_idx.0], connection
+                            );
                         }
-                        if src_to_split_idx.contains_key(connection) {
+                        if let Some(internal_idx) = src_to_split_idx.get(connection) {
                             let connected_tri = source[*connection].as_ref_unchecked();
                             if split_size == 1804800 {
                                 println!(
@@ -453,7 +460,7 @@ fn split<'a>(
                                 );
                             }
                             if connected_tri.taken_by != idxs.0 {
-                                to_check.push_back(*connection);
+                                to_check.push(Reverse(*internal_idx));
                             }
                         }
                     }

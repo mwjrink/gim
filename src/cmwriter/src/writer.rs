@@ -504,6 +504,7 @@ fn split<'a>(
                     tris_in_collection.insert(tri_idx);
                     count += 1;
                 } else if count < split_size {
+                    // here we just need to swap some values around. It looks nearly perfect otherwise.
                     panic!("The clusters are non contiguous, splitting would fail.");
                 }
             }

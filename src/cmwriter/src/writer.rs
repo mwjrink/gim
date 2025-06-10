@@ -2,7 +2,7 @@ use ahash::{HashMap, HashMapExt};
 use interop::TESTING;
 use interop::{Vertex, TRIS_IN_CLUSTER};
 use std::cell::UnsafeCell;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::{f32, usize};
 use ultraviolet::Vec3;
 
@@ -404,7 +404,6 @@ fn split<'a>(
         for (idx, value) in idx_list.iter().enumerate() {
             src_to_split_idx.insert(*value, idx);
         }
-        let mut edge_0 = HashMap::new();
         // NEED TO ENSURE THE SPLITS ARE MANIFOLDS/CONTIGUOUS
         // TODO this breaks for non manifold tri pairs...
         // start from the lowest and go through, make sure everything is attached to it in some way
@@ -412,7 +411,6 @@ fn split<'a>(
         let mut to_check = VecDeque::new();
         to_check.push_back(idx_list[0]);
         let mut consumed = 0;
-        let mut last_resort = Vec::new();
         loop {
             if consumed == split_size {
                 break;
@@ -424,111 +422,79 @@ fn split<'a>(
                         source[check_idx].as_mut_unchecked().taken_by = idxs.0;
                         consumed += 1;
                     } else {
+                        // Assume we have already looked at this triangle
                         continue;
                     }
 
                     let tri = source[check_idx].as_ref_unchecked();
                     // connections is relative to the SOURCE SOURCE not the specific algo mesh...
-                    for (conn_idx, connection) in tri.connections.iter().enumerate() {
-                        if let Some(idx) = src_to_split_idx.get(connection) {
+                    for connection in &tri.connections {
+                        println!("tri {} is connected to {}", check_idx, connection);
+                        if src_to_split_idx.contains_key(connection) {
                             let connected_tri = source[*connection].as_ref_unchecked();
+                            println!(
+                                "taken_by on connection was: {} looking for {}",
+                                connected_tri.taken_by, idxs.0
+                            );
                             if connected_tri.taken_by != idxs.0 {
-                                if *idx < split_size {
-                                    to_check.push_back(*connection);
-                                } else {
-                                    last_resort.push(*idx);
-                                }
+                                to_check.push_back(*connection);
                             }
-
-                            // else {
-                            //     // match conn_idx {
-                            //     //     0 => {
-                            //     //         let i0 = indices[tri.idx * 3 + 0];
-                            //     //         let i1 = indices[tri.idx * 3 + 1];
-                            //     //         edge_0.insert([i0, i1], check_idx);
-                            //     //     }
-                            //     //     1 => {
-                            //     //         let i1 = indices[tri.idx * 3 + 1];
-                            //     //         let i2 = indices[tri.idx * 3 + 2];
-                            //     //         edge_0.insert([i1, i2], check_idx);
-                            //     //     }
-                            //     //     2 => {
-                            //     //         let i2 = indices[tri.idx * 3 + 2];
-                            //     //         let i0 = indices[tri.idx * 3 + 0];
-                            //     //         edge_0.insert([i2, i0], check_idx);
-                            //     //     }
-                            //     //     _ => {
-                            //     //         panic!("conn_idx is not 0, 1 or 2. This is compiler guaranteed. Either your PC is fucked, or a solar flare just flipped a bit.");
-                            //     //     }
-                            //     // }
-                            // }
                         }
                     }
                 }
             } else {
-                break;
+                panic!(
+                    "We ran out of triangles to check! {} => {}",
+                    consumed, split_size
+                );
             }
         }
 
-        // TODO make sure there are asserts but non manifold should be impossble based on how we chose them.
-        // assert_eq!(settered, split_size);
+        unsafe {
+            idx_list.sort_unstable_by(|a, b| {
+                source[*a]
+                    .as_ref_unchecked()
+                    .taken_by
+                    .cmp(&source[*b].as_ref_unchecked().taken_by)
+            });
+        }
 
-        // let mut non_manifold0 = Vec::new();
-        // let mut non_manifold1 = Vec::new();
+        #[cfg(debug_assertions)]
+        {
+            src_to_split_idx.clear();
+            for (idx, value) in idx_list.iter().enumerate() {
+                src_to_split_idx.insert(*value, idx);
+            }
 
-        // for (idx, tri_idx) in idx_list.iter().enumerate() {
-        //     let tri = unsafe { &source[*tri_idx].as_ref_unchecked() };
-        //     if idx < split_size {
-        //         if tri.taken_by != idxs.0 {
-        //             non_manifold0.push(idx);
-        //         }
-        //     } else {
-        //         if tri.taken_by == idxs.0 {
-        //             non_manifold1.push(idx);
-        //         }
-        //     }
-        // }
+            // TODO make sure there are asserts but non manifold should be impossble based on how we chose them.
+            let mut count = 0;
+            let mut tris_in_collection = HashSet::new();
+            for tri_idx in idx_list.iter() {
+                let tri = unsafe { source[*tri_idx].as_ref_unchecked() };
+                if tri.taken_by == idxs.0 {
+                    tris_in_collection.insert(tri_idx);
+                    count += 1;
+                } else if count < split_size {
+                    panic!("The clusters are non contiguous, splitting would fail.");
+                }
+            }
+            assert_eq!(count, split_size);
 
-        // loop {
-        //     if non_manifold0.len() > 0 && non_manifold1.len() > 0 {
-        //         let tri0_split_idx = non_manifold0.pop().unwrap();
-        //         let tri1_split_idx = non_manifold1.pop().unwrap();
-
-        //         idx_list.swap(tri0_split_idx, tri1_split_idx);
-        //         unsafe {
-        //             source[idx_list[tri1_split_idx]].as_mut_unchecked().taken_by = idxs.1;
-        //             source[idx_list[tri0_split_idx]].as_mut_unchecked().taken_by = idxs.0;
-        //         };
-        //     // } else if non_manifold0.len() > 0 {
-        //     //     let tri0_split_idx = non_manifold0.pop().unwrap();
-        //     //     let tri1_split_idx = dskfjsld;
-
-        //     //     idx_list.swap(tri0_split_idx, tri1_split_idx);
-        //     //     // find an edge tri in cluster 0
-        //     //     // swap it with the non manifold here.
-        //     // } else if non_manifold1.len() > 0 {
-        //     //     let tri1_split_idx = non_manifold1.pop().unwrap();
-        //     //     let tri0_split_idx = dskfjsld;
-
-        //     //     idx_list.swap(tri0_split_idx, tri1_split_idx);
-        //     //     // find an edge tri in cluster 1
-        //     //     // swap it with the non manifold here.
-        //     } else {
-        //         break;
-        //     }
-        // }
-
-        // assert_ne!(non_manifold0.len(), split_size);
-        // assert_ne!(non_manifold1.len(), split_size);
-
-        // if non_manifold0.len() > 0 || non_manifold1.len() > 0 {
-        //     println!(
-        //         "Non Manifold Tris: {} vs {}",
-        //         non_manifold0.len(),
-        //         non_manifold1.len()
-        //     );
-        // }
-        // TODO finish non_manifold shit here
+            for tri_idx in idx_list[0..split_size].iter() {
+                let tri = unsafe { source[*tri_idx].as_ref_unchecked() };
+                let mut manifold = false;
+                for connection in &tri.connections {
+                    let connected = unsafe { source[*connection].as_ref_unchecked() };
+                    if tris_in_collection.contains(connection) {
+                        manifold = true; // ensure at least one connection to the rest of the cluster
+                        assert_eq!(connected.taken_by, idxs.0);
+                        let internal_idx = src_to_split_idx.get(connection).unwrap();
+                        assert!(*internal_idx < split_size);
+                    }
+                }
+                assert!(manifold);
+            }
+        };
     };
 
     {

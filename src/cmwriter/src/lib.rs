@@ -140,5 +140,5 @@ struct AlgoMesh {
 }
 
 struct AlgoCluster {
-    pub tri_idx_list: [usize; TRIS_IN_CLUSTER],
+    pub tri_idxs: Vec<usize>,
 }

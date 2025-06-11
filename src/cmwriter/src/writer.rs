@@ -5,7 +5,7 @@ use foldhash::{HashSet, HashSetExt};
 use interop::TRIS_IN_CLUSTER;
 use std::cell::UnsafeCell;
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, VecDeque};
 use std::usize;
 use ultraviolet::{f32x8, Vec3, Vec3x8};
 
@@ -275,17 +275,6 @@ fn subdivide(
     adjacency_graph: &HashMap<Edge, usize>,
 ) -> Vec<AlgoCluster> {
     let mut clustered_tris = 0;
-    let mut seed = {
-        let seed = triangles
-            .iter()
-            .position(|tri| unsafe { tri.as_ref_unchecked().connections.contains(&usize::MAX) });
-
-        if let Some(seed) = seed {
-            seed
-        } else {
-            0
-        }
-    };
 
     let add_new_potentials = |tri: &Triangle,
                               anchor: Vec3,
@@ -314,97 +303,113 @@ fn subdivide(
 
     // overall
     let mut clusters = Vec::with_capacity(triangles.len() / TRIS_IN_CLUSTER + 5);
-    let mut edge_cut = HashSet::<Edge>::new();
+    let mut clusters_to_split = VecDeque::with_capacity(triangles.len() / TRIS_IN_CLUSTER);
+    // let mut edge_cut = HashSet::<Edge>::new();
+    let mut cluster_idx = 0;
 
     // cluster specific data types
-    let mut potential_tris = BinaryHeap::with_capacity(TRIS_IN_CLUSTER);
-    let mut c_edge_cut = HashSet::<Edge>::new();
+    let mut potential_trisL = BinaryHeap::with_capacity(TRIS_IN_CLUSTER);
+    let mut stealable_trisL = BinaryHeap::with_capacity(TRIS_IN_CLUSTER);
+    let mut potential_trisR = BinaryHeap::with_capacity(TRIS_IN_CLUSTER);
+    let mut stealable_trisR = BinaryHeap::with_capacity(TRIS_IN_CLUSTER);
+    let mut c_edge_cutL = HashSet::<Edge>::new();
+    let mut c_edge_cutR = HashSet::<Edge>::new();
     // choose this from the mesh edge
     loop {
-        c_edge_cut.clear();
-        let cluster_idx = clusters.len();
+        if let Some(parent) = clusters_to_split.pop_back() {
+            c_edge_cutL.clear();
+            c_edge_cutR.clear();
+            potential_trisL.clear();
+            stealable_trisL.clear();
+            potential_trisR.clear();
+            stealable_trisR.clear();
+            let cluster_idxL = cluster_idx;
+            let cluster_idxR = cluster_idx + 1;
 
-        // create a cluster
-        let cluster = {
-            let mut cluster = AlgoCluster {
-                tri_idx_list: [usize::MAX; TRIS_IN_CLUSTER],
-            };
+            // create a cluster
+            let cluster = {
+                let mut cluster = AlgoCluster {
+                    tri_idxs: Vec::with_capacity(parent.tri_idxs.len() / 2),
+                };
 
-            c_edge_cut.clear();
-            potential_tris.clear();
-            potential_tris.push(Reverse(PotentialTri {
-                adjacent_edges: 1,
-                dist: 0.0,
-                idx: seed,
-            }));
+                potential_tris.push(Reverse(PotentialTri {
+                    adjacent_edges: 1,
+                    dist: 0.0,
+                    idx: seed,
+                }));
 
-            let anchor = unsafe { triangles[seed].as_ref_unchecked().anchor };
-            for tri_idx in 0..TRIS_IN_CLUSTER {
-                if let Some(lowest) = potential_tris.pop() {
-                    let lowest = lowest.0;
-                    let low_tri = unsafe { triangles[lowest.idx].as_mut_unchecked() };
-                    low_tri.owned_by = cluster_idx;
-                    clustered_tris += 1;
-                    add_new_potentials(low_tri, anchor, &mut potential_tris, &c_edge_cut);
-                    insert(&mut c_edge_cut, low_tri);
-                    cluster.tri_idx_list[tri_idx] = lowest.idx;
-                } else {
-                    // this probably isn't a panic, just a degen cluster
-                    // panic!("There are no more border tris! Current idx: {} Overall Clustered: {} Currently: {}", cluster_idx, clustered_tris, tri_idx);
-                    println!(
-                        "Created a degen cluster idx {} with {} tris.",
-                        cluster_idx, tri_idx
-                    );
-                    break;
-                }
-            }
-
-            cluster
-        };
-
-        clusters.push(cluster);
-        intersect(&mut edge_cut, &c_edge_cut);
-
-        // find a new seed
-        seed = {
-            let mut seed_idx = 0;
-            for edge in &edge_cut {
-                if let Some(tri_idx) = adjacency_graph.get(edge) {
-                    let tri = unsafe { triangles[*tri_idx].as_ref_unchecked() };
-                    assert_eq!(tri.owned_by, usize::MAX);
-                    // if this fails, something is wrong. None of the triangles
-                    // outside of the edge cut should be clustered
-                    let mut neighboring_clusters = 0;
-                    for connection in &tri.connections {
-                        if *connection != usize::MAX {
-                            let tri = unsafe { triangles[*connection].as_ref_unchecked() };
-                            if tri.owned_by != usize::MAX {
-                                neighboring_clusters += 1;
-                            }
-                        }
-                    }
-                    if neighboring_clusters == 2 {
-                        seed_idx = *tri_idx;
+                let anchor = unsafe { triangles[seed].as_ref_unchecked().anchor };
+                for tri_idx in 0..TRIS_IN_CLUSTER {
+                    if let Some(lowest) = potential_tris.pop() {
+                        let lowest = lowest.0;
+                        let low_tri = unsafe { triangles[lowest.idx].as_mut_unchecked() };
+                        low_tri.owned_by = cluster_idx;
+                        clustered_tris += 1;
+                        add_new_potentials(low_tri, anchor, &mut potential_tris, &c_edge_cut);
+                        insert(&mut c_edge_cut, low_tri);
+                        cluster.tri_idx_list[tri_idx] = lowest.idx;
+                    } else {
+                        // this probably isn't a panic, just a degen cluster
+                        // panic!("There are no more border tris! Current idx: {} Overall Clustered: {} Currently: {}", cluster_idx, clustered_tris, tri_idx);
+                        println!(
+                            "Created a degen cluster idx {} with {} tris.",
+                            cluster_idx, tri_idx
+                        );
                         break;
                     }
-                    // this is fallback if none of the tris have 2 overlapping edges
-                    seed_idx = *tri_idx;
-
-                    // let intersections = count_intersections(&edge_cut, tri);
-                    // if intersections == 2 {
-                    //     seed_idx = *tri_idx;
-                    //     break;
-                    // }
-
-                    // // this is fallback if none of the tris have 2 overlapping edges
-                    // seed_idx = *tri_idx;
                 }
+
+                cluster
+            };
+
+            if cluster.tri_idxs.len() <= TRIS_IN_CLUSTER {
+                clusters.push(cluster);
+            } else {
+                clusters_to_split.push_front(cluster);
             }
+            // intersect(&mut edge_cut, &c_edge_cut);
 
-            seed_idx
-        };
+            // find a new seed
+            // seed = {
+            //     let mut seed_idx = 0;
+            //     for edge in &edge_cut {
+            //         if let Some(tri_idx) = adjacency_graph.get(edge) {
+            //             let tri = unsafe { triangles[*tri_idx].as_ref_unchecked() };
+            //             assert_eq!(tri.owned_by, usize::MAX);
+            //             // if this fails, something is wrong. None of the triangles
+            //             // outside of the edge cut should be clustered
+            //             let mut neighboring_clusters = 0;
+            //             for connection in &tri.connections {
+            //                 if *connection != usize::MAX {
+            //                     let tri = unsafe { triangles[*connection].as_ref_unchecked() };
+            //                     if tri.owned_by != usize::MAX {
+            //                         neighboring_clusters += 1;
+            //                     }
+            //                 }
+            //             }
+            //             if neighboring_clusters == 2 {
+            //                 seed_idx = *tri_idx;
+            //                 break;
+            //             }
+            //             // this is fallback if none of the tris have 2 overlapping edges
+            //             seed_idx = *tri_idx;
 
-        if clustered_tris == triangles.len() {
+            //             // let intersections = count_intersections(&edge_cut, tri);
+            //             // if intersections == 2 {
+            //             //     seed_idx = *tri_idx;
+            //             //     break;
+            //             // }
+
+            //             // // this is fallback if none of the tris have 2 overlapping edges
+            //             // seed_idx = *tri_idx;
+            //         }
+            //     }
+
+            //     seed_idx
+            // };
+
+            cluster_idx += 2;
+        } else {
             break;
         }
     }

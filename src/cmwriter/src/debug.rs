@@ -1,7 +1,6 @@
-use std::io::Write;
-
-use crate::writer::{Mesh, Triangle};
+use crate::*;
 use interop::Vertex;
+use std::io::Write;
 
 pub fn dump_raw(mesh: &Mesh, path_addition: impl Into<Option<String>>) {
     // Save host visible framebuffer image to disk (ppm format)

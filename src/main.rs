@@ -1,6 +1,6 @@
-use cmwriter::writer::{self, Mesh};
+use cmwriter::*;
 use interop::Vertex;
-use ultraviolet::{Vec2, Vec3};
+use ultraviolet::Vec3;
 
 fn main() {
     let obj_file = "input/xyzrgb_dragon/xyzrgb_dragon.obj";

@@ -9,5 +9,5 @@ edition = "2021"
 [dependencies]
 # rand = "0.8.4"
 interop = { path = "../interop" }
-ahash = "0.8.11"
 ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
+foldhash = "0.1.5"

@@ -12,6 +12,7 @@ cmreader = { path = "src/cmreader" }
 cmwriter = { path = "src/cmwriter" }
 interop = { path = "src/interop" }
 ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
+foldhash = "0.1.5"
 
 # TODO
 # obj => mesh image

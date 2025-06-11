@@ -11,3 +11,4 @@ edition = "2021"
 interop = { path = "../interop" }
 ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
 foldhash = "0.1.5"
+metis = { version = "0.2.2", features = ["vendored"] }

@@ -17,10 +17,10 @@ ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
 # obj => mesh image
 # multiple images, float.x, float.y, float.z, albedo, roughness/shininess?
 
-# [profile.dev.package."*"]
-# # Set the default for dependencies in Development mode.
-# opt-level = 3
+[profile.dev.package."*"]
+# Set the default for dependencies in Development mode.
+opt-level = 3
 
-# [profile.dev]
-# # Turn on a small amount of optimisation in Development mode.
-# opt-level = 1
+[profile.dev]
+# Turn on a small amount of optimisation in Development mode.
+opt-level = 1

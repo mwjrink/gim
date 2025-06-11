@@ -2,6 +2,63 @@ use crate::*;
 use interop::Vertex;
 use std::io::Write;
 
+pub fn dump_clusters(
+    src: &[Vertex],
+    triangles: &[Triangle],
+    clusters: &[AlgoCluster],
+    path_addition: impl Into<Option<String>>,
+) {
+    // Save host visible framebuffer image to disk (ppm format)
+    let path = if let Some(addition) = path_addition.into() {
+        format!("output/debug_dump{}.obj", addition)
+    } else {
+        "output/debug_dump.obj".to_string()
+    };
+
+    std::fs::remove_file(&path);
+    let mut file = std::fs::OpenOptions::new()
+        // -
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)
+        .unwrap();
+
+    for vert in src {
+        file.write(
+            format!(
+                "v {} {} {}\n",
+                vert.position.x, vert.position.y, vert.position.z
+            )
+            .as_bytes(),
+        );
+    }
+    file.write(format!("s 0\n",).as_bytes());
+
+    for (idx, cluster) in clusters.iter().enumerate() {
+        file.write(format!("\n").as_bytes());
+        file.write(format!("o Cluster{}\n", idx).as_bytes());
+        for tri_idx in cluster.tri_idx_list {
+            if tri_idx == usize::MAX {
+                continue;
+            }
+
+            let tri = triangles[tri_idx];
+            file.write(
+                format!(
+                    "f {} {} {}\n",
+                    tri.idxs[0] + 1,
+                    tri.idxs[1] + 1,
+                    tri.idxs[2] + 1
+                )
+                .as_bytes(),
+            );
+        }
+    }
+
+    file.flush();
+}
+
 pub fn dump_raw(mesh: &Mesh, path_addition: impl Into<Option<String>>) {
     // Save host visible framebuffer image to disk (ppm format)
     let path = if let Some(addition) = path_addition.into() {

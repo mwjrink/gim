@@ -4,6 +4,8 @@ use ultraviolet::Vec3;
 
 fn main() {
     let obj_file = "input/xyzrgb_dragon/xyzrgb_dragon.obj";
+    // let obj_file = "input/bunny/bunny.obj";
+
     // let obj_file = "input/cube.obj";
 
     let (models, materials) = tobj::load_obj(
@@ -33,53 +35,54 @@ fn main() {
     }
 
     for (i, m) in models.iter().enumerate() {
-        let mesh = &m.mesh;
-        println!("model[{}].name = \'{}\'", i, m.name);
-        println!(
-            "model[{}].mesh.material_id = {:?}",
-            i,
-            mesh.material_id.unwrap_or_else(|| { usize::MAX })
-        );
+        // TODO keep the tobj loaded mesh here for testing
+        // this drop is good for the console app
+        let mut mesh = {
+            let mesh = &m.mesh;
+            println!("model[{}].name = \'{}\'", i, m.name);
+            println!(
+                "model[{}].mesh.material_id = {:?}",
+                i,
+                mesh.material_id.unwrap_or_else(|| { usize::MAX })
+            );
 
-        println!("Tris in model[{}]: {}", i, mesh.indices.len() / 3);
-        println!("Number of verts: {}", mesh.positions.len() / 3);
-        println!(
-            "Number of normal_indices: {}",
-            mesh.normal_indices.len() / 3
-        );
-        println!(
-            "Number of texcoord_indices: {}",
-            mesh.texcoord_indices.len() / 3
-        );
+            println!("Tris in model[{}]: {}", i, mesh.indices.len() / 3);
+            println!("Number of verts: {}", mesh.positions.len() / 3);
+            println!(
+                "Number of normal_indices: {}",
+                mesh.normal_indices.len() / 3
+            );
+            println!(
+                "Number of texcoord_indices: {}",
+                mesh.texcoord_indices.len() / 3
+            );
 
-        let mut vertices = Vec::with_capacity(mesh.positions.len() / 3);
-        for chunk in mesh.positions.chunks(3) {
-            vertices.push(Vertex {
-                position: Vec3::new(chunk[0], chunk[1], chunk[2]),
-                // // need to use mesh.normal_indices to get these
-                // normal: Vec3::new(
-                //     // mesh.normals[idx + 0],
-                //     // mesh.normals[idx + 1],
-                //     // mesh.normals[idx + 2],
-                //     0.0, 0.0, 0.0,
-                // ),
-                // // need to use mesh.texcoord_indices to get these
-                // tex_coords: Vec2::new(
-                //     // -
-                //     // mesh.texcoords[idx + 0],
-                //     // mesh.texcoords[idx + 1],
-                //     0.0,
-                //     0.0, // lucy doesn't have a texture, make sure to fix this in the future
-                // ),
-            });
-        }
+            let mut vertices = Vec::with_capacity(mesh.positions.len() / 3);
+            for chunk in mesh.positions.chunks(3) {
+                vertices.push(Vertex {
+                    position: Vec3::new(chunk[0], chunk[1], chunk[2]),
+                    // // need to use mesh.normal_indices to get these
+                    // normal: Vec3::new(
+                    //     // mesh.normals[idx + 0],
+                    //     // mesh.normals[idx + 1],
+                    //     // mesh.normals[idx + 2],
+                    //     0.0, 0.0, 0.0,
+                    // ),
+                    // // need to use mesh.texcoord_indices to get these
+                    // tex_coords: Vec2::new(
+                    //     // -
+                    //     // mesh.texcoords[idx + 0],
+                    //     // mesh.texcoords[idx + 1],
+                    //     0.0,
+                    //     0.0, // lucy doesn't have a texture, make sure to fix this in the future
+                    // ),
+                });
+            }
 
-        // TODO probably bad cause these could be HUGE, do something else, ...
-        // TODO... but that may have to wait for a better asset importer or a switch to gltf2 or usda
-        // TODO drop the tobj loaded mesh here in the console app, in this case, we keep it for testing
-        let mut mesh = Mesh {
-            vertices: vertices,
-            indices: mesh.indices.clone(),
+            Mesh {
+                vertices: vertices,
+                indices: mesh.indices.clone(),
+            }
         };
 
         println!("About to write.");

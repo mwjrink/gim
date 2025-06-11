@@ -1,10 +1,42 @@
 #![feature(unsafe_cell_access)]
 
 use foldhash::HashSet;
-use interop::Vertex;
+use interop::{Vertex, TRIS_IN_CLUSTER};
 use ultraviolet::Vec3;
 pub mod debug;
 pub mod writer;
+
+// Don't use this, it's SUPER SLOW for some reason
+// pub(crate) fn count_intersections(e0: &HashSet<Edge>, tri: &Triangle) -> u8 {
+//     let edges = [
+//         [tri.idxs[0], tri.idxs[1]],
+//         [tri.idxs[1], tri.idxs[2]],
+//         [tri.idxs[2], tri.idxs[0]],
+//     ];
+//     let mut count = 0;
+//     for edge in edges {
+//         if e0.contains(&edge) {
+//             count += 1
+//         }
+//     }
+
+//     count
+// }
+
+pub(crate) fn insert(e0: &mut HashSet<Edge>, tri: &Triangle) {
+    let edges = [
+        [tri.idxs[1], tri.idxs[0]],
+        [tri.idxs[2], tri.idxs[1]],
+        [tri.idxs[0], tri.idxs[2]],
+    ];
+    for edge in edges {
+        if e0.contains(&edge) {
+            e0.remove(&edge);
+        } else {
+            e0.insert(edge);
+        }
+    }
+}
 
 pub fn intersect(e0: &mut HashSet<Edge>, other: &HashSet<Edge>) {
     // need to reverse the edge of one of them?
@@ -107,9 +139,6 @@ struct AlgoMesh {
     pub triangles: Vec<Triangle>,
 }
 
-struct AlgoMeshSubset<'a> {
-    // pub start: usize,
-    // pub len: usize,
-    pub tri_idx_list: &'a mut [usize],
-    // _phantom: PhantomCovariantLifetime<'a>,
+struct AlgoCluster {
+    pub tri_idx_list: [usize; TRIS_IN_CLUSTER],
 }

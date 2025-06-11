@@ -1,12 +1,14 @@
+use crate::debug::dump_clusters;
 use crate::*;
 use foldhash::{HashMap, HashMapExt};
 use foldhash::{HashSet, HashSetExt};
 use interop::TRIS_IN_CLUSTER;
 use std::cell::UnsafeCell;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::usize;
 use ultraviolet::{f32x8, Vec3, Vec3x8};
 
-// TODO add a tri trading step where clusters trade triangles
 pub fn write(mesh: &mut Mesh) -> CTree {
     let mut nodes = Vec::new();
     let mut clusters = Vec::new();
@@ -139,14 +141,16 @@ pub fn write(mesh: &mut Mesh) -> CTree {
                     if let Some(adjacent_idx) = adjacency_graph.get(edge) {
                         assert_eq!(tri.connections[eidx], *adjacent_idx);
                     } else {
-                        panic!("Connection: {} {:?} doesn't exist.", eidx, edge);
+                        // not all meshes are manifold
+                        // panic!("Connection: {} {:?} doesn't exist.", eidx, edge);
                     }
                 }
 
                 // this mesh might not have a fully contiguous surface...
                 for (cn_idx, connection) in tri.connections.iter().enumerate() {
                     if *connection == usize::MAX {
-                        panic!("Assigning connections failed!");
+                        // not all meshes are manifold
+                        // panic!("Assigning connections failed!");
                     }
                 }
             }
@@ -155,7 +159,7 @@ pub fn write(mesh: &mut Mesh) -> CTree {
 
     // start splitting
     {
-        let mut idx_list: Vec<usize> = (0..algo_mesh.triangles.len()).collect();
+        // let mut idx_list: Vec<usize> = (0..algo_mesh.triangles.len()).collect();
         // println!("Dumping...");
         // dump(
         //     &mesh.vertices,
@@ -172,8 +176,11 @@ pub fn write(mesh: &mut Mesh) -> CTree {
             .iter_mut()
             .map(|tri| UnsafeCell::new(tri))
             .collect::<Vec<UnsafeCell<&mut Triangle>>>();
-        // let subsets = subdivide(&mesh.indices, &mesh.vertices, &source, &mut idx_list);
+        let clusters = subdivide(&source, &adjacency_graph);
         println!("Done subdividing.");
+        println!("Dumping.");
+        dump_clusters(&mesh.vertices, &algo_mesh.triangles, &clusters, None);
+        println!("Done dumping.");
 
         let mut not_equal = 0;
         // for (idx, subset) in subsets.iter().enumerate() {
@@ -227,83 +234,182 @@ pub fn write(mesh: &mut Mesh) -> CTree {
     CTree { nodes, clusters }
 }
 
+struct PotentialTri {
+    adjacent_edges: u8,
+    dist: f32,
+    idx: usize,
+}
+
+impl Eq for PotentialTri {}
+impl PartialEq for PotentialTri {
+    fn eq(&self, other: &Self) -> bool {
+        let self_dist = self.dist * (3 - self.adjacent_edges) as f32;
+        let other_dist = other.dist * (3 - other.adjacent_edges) as f32;
+        self_dist.eq(&other_dist)
+    }
+}
+
+impl PartialOrd for PotentialTri {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let self_dist = self.dist * (3 - self.adjacent_edges) as f32;
+        let other_dist = other.dist * (3 - other.adjacent_edges) as f32;
+        self_dist.partial_cmp(&other_dist)
+    }
+}
+
+impl Ord for PotentialTri {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let self_dist = self.dist * (3 - self.adjacent_edges) as f32;
+        let other_dist = other.dist * (3 - other.adjacent_edges) as f32;
+        self_dist.total_cmp(&other_dist)
+    }
+}
+
 // Algorithm options:
 //  1. randomly toss the triangles into a heap or queue or whatever
 //  2. take one out and see if it borders a cluster, if it does, check if it can be added
 //  3. if it can't be added, start a new cluster from it.
 //  4. if a triangle is bordered by 2 clusters, see if they can be merged.
-fn subdivide(triangles: &[UnsafeCell<Triangle>], adjacency_graph: &HashMap<Edge, usize>) -> () {
+fn subdivide(
+    triangles: &[UnsafeCell<&mut Triangle>],
+    adjacency_graph: &HashMap<Edge, usize>,
+) -> Vec<AlgoCluster> {
     let mut clustered_tris = 0;
     let mut seed = {
         let seed = triangles
             .iter()
-            .find(|tri| unsafe { tri.as_ref_unchecked().connections.contains(&usize::MAX) });
+            .position(|tri| unsafe { tri.as_ref_unchecked().connections.contains(&usize::MAX) });
 
         if let Some(seed) = seed {
             seed
         } else {
-            &triangles[0]
+            0
         }
     };
 
+    let add_new_potentials = |tri: &Triangle,
+                              anchor: Vec3,
+                              potential_tris: &mut BinaryHeap<Reverse<PotentialTri>>,
+                              c_edge_cut: &HashSet<[u32; 2]>| {
+        for connection in &tri.connections {
+            if *connection != usize::MAX {
+                let adjacent = unsafe { triangles[*connection].as_ref_unchecked() };
+                if adjacent.owned_by == usize::MAX {
+                    let dist = (adjacent.anchor - anchor).mag_sq();
+                    let before = potential_tris.len();
+                    potential_tris.retain(|pt| pt.0.idx != *connection); // is this necessary?
+                    let after = potential_tris.len();
+
+                    // let adjacent = count_intersections(&c_edge_cut, adjacent);
+                    let adjacent = 1 + (before - after) as u8;
+                    potential_tris.push(Reverse(PotentialTri {
+                        adjacent_edges: adjacent,
+                        dist,
+                        idx: *connection,
+                    }));
+                }
+            }
+        }
+    };
+
+    // overall
+    let mut clusters = Vec::with_capacity(triangles.len() / TRIS_IN_CLUSTER + 5);
     let mut edge_cut = HashSet::<Edge>::new();
+
+    // cluster specific data types
+    let mut potential_tris = BinaryHeap::with_capacity(TRIS_IN_CLUSTER);
     let mut c_edge_cut = HashSet::<Edge>::new();
     // choose this from the mesh edge
     loop {
         c_edge_cut.clear();
+        let cluster_idx = clusters.len();
 
-        let seed = unsafe { seed.as_ref_unchecked() };
-        c_edge_cut.insert([seed.idxs[1], seed.idxs[0]]);
-        c_edge_cut.insert([seed.idxs[2], seed.idxs[1]]);
-        c_edge_cut.insert([seed.idxs[0], seed.idxs[2]]);
+        // create a cluster
+        let cluster = {
+            let mut cluster = AlgoCluster {
+                tri_idx_list: [usize::MAX; TRIS_IN_CLUSTER],
+            };
 
-        let anchor = Vec3x8::splat(seed.anchor);
-        for _ in 0..TRIS_IN_CLUSTER {
-            let mut lowest = (0usize, f32::MAX);
+            c_edge_cut.clear();
+            potential_tris.clear();
+            potential_tris.push(Reverse(PotentialTri {
+                adjacent_edges: 1,
+                dist: 0.0,
+                idx: seed,
+            }));
 
-            let mut xs = [f32::MAX; 8];
-            let mut ys = [f32::MAX; 8];
-            let mut zs = [f32::MAX; 8];
-
-            let mut tri_idxs = [usize::MAX; 8];
-            // need to batch this in 8
-            for (idx, edge) in c_edge_cut.iter().chunks(3).enumerate() {
-                if let Some(tri_idx) = adjacency_graph.get(edge) {
-                    let tri = unsafe { triangles[*tri_idx].as_ref_unchecked() };
-                    if tri.owned_by != usize::MAX {
-                        continue;
-                    }
-
-                    xs[idx] = tri.anchor.x;
-                    ys[idx] = tri.anchor.y;
-                    zs[idx] = tri.anchor.z;
-                    tri_idxs[idx] =
+            let anchor = unsafe { triangles[seed].as_ref_unchecked().anchor };
+            for tri_idx in 0..TRIS_IN_CLUSTER {
+                if let Some(lowest) = potential_tris.pop() {
+                    let lowest = lowest.0;
+                    let low_tri = unsafe { triangles[lowest.idx].as_mut_unchecked() };
+                    low_tri.owned_by = cluster_idx;
+                    clustered_tris += 1;
+                    add_new_potentials(low_tri, anchor, &mut potential_tris, &c_edge_cut);
+                    insert(&mut c_edge_cut, low_tri);
+                    cluster.tri_idx_list[tri_idx] = lowest.idx;
+                } else {
+                    // this probably isn't a panic, just a degen cluster
+                    // panic!("There are no more border tris! Current idx: {} Overall Clustered: {} Currently: {}", cluster_idx, clustered_tris, tri_idx);
+                    println!(
+                        "Created a degen cluster idx {} with {} tris.",
+                        cluster_idx, tri_idx
+                    );
+                    break;
                 }
             }
 
-            let comp = Vec3x8::new(f32x8::new(xs), f32x8::new(ys), f32x8::new(zs));
+            cluster
+        };
 
-            let vals = (comp - anchor).mag_sq();
+        clusters.push(cluster);
+        intersect(&mut edge_cut, &c_edge_cut);
 
-            let new_min = vals
-                .to_array()
-                .into_iter()
-                .enumerate()
-                .reduce(|a, b| if a.1 < b.1 { a } else { b })
-                .unwrap();
+        // find a new seed
+        seed = {
+            let mut seed_idx = 0;
+            for edge in &edge_cut {
+                if let Some(tri_idx) = adjacency_graph.get(edge) {
+                    let tri = unsafe { triangles[*tri_idx].as_ref_unchecked() };
+                    assert_eq!(tri.owned_by, usize::MAX);
+                    // if this fails, something is wrong. None of the triangles
+                    // outside of the edge cut should be clustered
+                    let mut neighboring_clusters = 0;
+                    for connection in &tri.connections {
+                        if *connection != usize::MAX {
+                            let tri = unsafe { triangles[*connection].as_ref_unchecked() };
+                            if tri.owned_by != usize::MAX {
+                                neighboring_clusters += 1;
+                            }
+                        }
+                    }
+                    if neighboring_clusters == 2 {
+                        seed_idx = *tri_idx;
+                        break;
+                    }
+                    // this is fallback if none of the tris have 2 overlapping edges
+                    seed_idx = *tri_idx;
 
-            if new_min.0 < lowest.0 {
-                lowest = (new_min.0, tri_idxs[new_min.1]);
+                    // let intersections = count_intersections(&edge_cut, tri);
+                    // if intersections == 2 {
+                    //     seed_idx = *tri_idx;
+                    //     break;
+                    // }
+
+                    // // this is fallback if none of the tris have 2 overlapping edges
+                    // seed_idx = *tri_idx;
+                }
             }
 
-            // now do something with lowest
-        }
-        intersect(&mut edge_cut, &c_edge_cut);
+            seed_idx
+        };
 
         if clustered_tris == triangles.len() {
             break;
         }
     }
+
+    println!("Clusters: {}", clusters.len());
 
     // this is used kind of like a queue but average O(1) removals... is this needed?
     // tris = HashSet::<Triangle>::with_capacity/from()
@@ -353,5 +459,5 @@ fn subdivide(triangles: &[UnsafeCell<Triangle>], adjacency_graph: &HashMap<Edge,
     // ;
     //
     // cluster_edge: Vec<Edge>
-    //
+    clusters
 }

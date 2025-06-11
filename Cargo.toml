@@ -2,7 +2,7 @@
 name = "gim"
 version = "0.1.0"
 authors = ["mwjrink <mwjrink@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,16 +12,15 @@ cmreader = { path = "src/cmreader" }
 cmwriter = { path = "src/cmwriter" }
 interop = { path = "src/interop" }
 ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
-foldhash = "0.1.5"
 
 # TODO
 # obj => mesh image
 # multiple images, float.x, float.y, float.z, albedo, roughness/shininess?
 
-[profile.dev.package."*"]
-# Set the default for dependencies in Development mode.
-opt-level = 3
+# [profile.dev.package."*"]
+# # Set the default for dependencies in Development mode.
+# opt-level = 3
 
-[profile.dev]
-# Turn on a small amount of optimisation in Development mode.
-opt-level = 1
+# [profile.dev]
+# # Turn on a small amount of optimisation in Development mode.
+# opt-level = 1

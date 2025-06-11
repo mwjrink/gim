@@ -19,11 +19,6 @@ pub struct Node {
 // TODO this needs to be pulled from a common library or something.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
-// TODO should these be stored separately?
-// probably not because we use them all in
-// the same place, right? it is making
-// blas construction slower in theory
-// though
 pub struct Vertex {
     pub position: Vec3,
     // pub normal: Vec3,

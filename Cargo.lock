@@ -73,7 +73,6 @@ version = "0.1.0"
 dependencies = [
  "cmreader",
  "cmwriter",
- "foldhash",
  "interop",
  "tobj",
  "ultraviolet",

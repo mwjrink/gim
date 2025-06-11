@@ -456,20 +456,20 @@ fn split<'a>(
         let mut consumed_right = 0;
 
         loop {
-            if consumed_left == split_size && (idx_list.len() - consumed_right) == split_size {
-                break;
-            }
-
             let remaining_left = split_size - consumed_left;
             let remaining_right = idx_list.len() - split_size - consumed_right;
 
-            let can_steal_left =
-                remaining_left > 0 && to_check_left.is_empty() && remaining_right == 0;
-            let can_steal_right =
-                remaining_right > 0 && to_check_right.is_empty() && remaining_left == 0;
+            if remaining_left == 0 && remaining_right == 0 {
+                break;
+            }
 
-            if (remaining_left >= remaining_right && (!to_check_left.is_empty() || can_steal_left))
-                || (to_check_right.is_empty() && !can_steal_right)
+            let can_steal_left = remaining_left > 0 && to_check_left.is_empty();
+            let can_steal_right = remaining_right > 0 && to_check_right.is_empty();
+            // let can_steal_left = remaining_left > 0 && to_check_left.is_empty();
+            // let can_steal_right = remaining_right > 0 && to_check_right.is_empty();
+
+            if remaining_right == 0
+                || (remaining_left != 0 && to_check_left.len() <= to_check_right.len())
             {
                 let check_idx = if let Some(check_idx) = to_check_left.pop() {
                     check_idx.0
@@ -483,9 +483,12 @@ fn split<'a>(
                             unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
                         // connections is relative to the SOURCE SOURCE not the specific algo mesh...
                         for connection in &connections {
-                            let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
-                            if connected_tri.taken_by == idxs.0 {
-                                touching += 1;
+                            if *connection != usize::MAX {
+                                let connected_tri =
+                                    unsafe { source[*connection].as_ref_unchecked() };
+                                if connected_tri.taken_by == idxs.0 {
+                                    touching += 1;
+                                }
                             }
                         }
 
@@ -607,12 +610,14 @@ fn split<'a>(
                     unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
                 // connections is relative to the SOURCE SOURCE not the specific algo mesh...
                 for connection in &connections {
-                    if let Some(internal_idx) = src_to_split_idx.get(connection) {
-                        let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
-                        if connected_tri.taken_by == idxs.1 {
-                            stealable_left.push(Reverse(*internal_idx));
-                        } else if connected_tri.taken_by != idxs.0 {
-                            to_check_left.push(Reverse(*internal_idx));
+                    if *connection != usize::MAX {
+                        if let Some(internal_idx) = src_to_split_idx.get(connection) {
+                            let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
+                            if connected_tri.taken_by == idxs.1 {
+                                stealable_left.push(Reverse(*internal_idx));
+                            } else if connected_tri.taken_by != idxs.0 {
+                                to_check_left.push(Reverse(*internal_idx));
+                            }
                         }
                     }
                 }
@@ -711,6 +716,46 @@ fn split<'a>(
                         );
                     }
                 } else {
+                    let source = source
+                        .iter()
+                        .map(|v| unsafe { **v.as_ref_unchecked() })
+                        .collect::<Vec<Triangle>>();
+                    dump(
+                        verts,
+                        indices,
+                        &source,
+                        &idx_list,
+                        "PanicOnSplitParent".to_string(),
+                        "Parent",
+                    );
+
+                    let idx0 = idx_list
+                        .iter()
+                        .cloned()
+                        .filter(|idx| source[*idx].taken_by == idxs.0)
+                        .collect::<Vec<usize>>();
+                    dump(
+                        verts,
+                        indices,
+                        &source,
+                        &idx0,
+                        "PanicOnSplit1".to_string(),
+                        "ChildLeft",
+                    );
+
+                    let idx1 = idx_list
+                        .iter()
+                        .cloned()
+                        .filter(|idx| source[*idx].taken_by == idxs.1)
+                        .collect::<Vec<usize>>();
+                    dump(
+                        verts,
+                        indices,
+                        &source,
+                        &idx1,
+                        "PanicOnSplit2".to_string(),
+                        "ChildRight",
+                    );
                     panic!(
                         "\
                         Not sure if this is an error... this is here temporarily4.\
@@ -719,7 +764,7 @@ fn split<'a>(
                         \nStealable: {} {}\
                         \nTargets: {} {}\
                         \nRemaining: {} {}\
-                        \nCan Steal left: {} {} {} {}",
+                        \nCan Steal right: {} {} {} {}",
                         consumed_left,
                         consumed_right,
                         to_check_left.len(),
@@ -735,7 +780,7 @@ fn split<'a>(
                         to_check_right.is_empty(),
                         remaining_left == 0
                     );
-                    // continue;
+                    continue;
                 };
 
                 {
@@ -757,12 +802,14 @@ fn split<'a>(
                     unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
                 // connections is relative to the SOURCE SOURCE not the specific algo mesh...
                 for connection in &connections {
-                    if let Some(internal_idx) = src_to_split_idx.get(connection) {
-                        let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
-                        if connected_tri.taken_by == idxs.0 {
-                            stealable_right.push(*internal_idx);
-                        } else if connected_tri.taken_by != idxs.1 {
-                            to_check_right.push(*internal_idx);
+                    if *connection != usize::MAX {
+                        if let Some(internal_idx) = src_to_split_idx.get(connection) {
+                            let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
+                            if connected_tri.taken_by == idxs.0 {
+                                stealable_right.push(*internal_idx);
+                            } else if connected_tri.taken_by != idxs.1 {
+                                to_check_right.push(*internal_idx);
+                            }
                         }
                     }
                 }

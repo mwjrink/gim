@@ -220,14 +220,16 @@ pub fn write(mesh: &mut Mesh) -> CTree {
                     if let Some(adjacent_idx) = adjacency_graph.get(edge) {
                         assert_eq!(tri.connections[eidx], *adjacent_idx);
                     } else {
-                        panic!("Connection: {} {:?} doesn't exist.", eidx, edge);
+                        // not all meshes are manifold
+                        // panic!("Connection: {} {:?} doesn't exist.", eidx, edge);
                     }
                 }
 
                 // this mesh might not have a fully contiguous surface...
                 for (cn_idx, connection) in tri.connections.iter().enumerate() {
                     if *connection == usize::MAX {
-                        panic!("Assigning connections failed!");
+                        // not all meshes are manifold
+                        // panic!("Assigning connections failed!");
                     }
                 }
             }
@@ -265,6 +267,7 @@ pub fn write(mesh: &mut Mesh) -> CTree {
                     &algo_mesh.triangles,
                     subset.idx_list,
                     format!("final_degen_{}", idx).to_string(),
+                    "0",
                 );
                 not_equal += 1;
             } else if subset.idx_list.len() > TRIS_IN_CLUSTER {
@@ -277,6 +280,7 @@ pub fn write(mesh: &mut Mesh) -> CTree {
                     &algo_mesh.triangles,
                     subset.idx_list,
                     format!("final_{}", idx).to_string(),
+                    "1",
                 );
             }
         }
@@ -472,6 +476,7 @@ fn split<'a>(
                 } else if can_steal_left {
                     if let Some(check_idx) = stealable_left.pop() {
                         let check_idx = check_idx.0;
+                        // this touching check ensures stealing doesn't destroy connectivity in the other mesh
                         let mut touching = 0;
 
                         let connections =
@@ -490,6 +495,46 @@ fn split<'a>(
 
                         check_idx
                     } else {
+                        let source = source
+                            .iter()
+                            .map(|v| unsafe { **v.as_ref_unchecked() })
+                            .collect::<Vec<Triangle>>();
+                        dump(
+                            verts,
+                            indices,
+                            &source,
+                            &idx_list,
+                            "PanicOnSplitParent".to_string(),
+                            "Parent",
+                        );
+
+                        let idx0 = idx_list
+                            .iter()
+                            .cloned()
+                            .filter(|idx| source[*idx].taken_by == idxs.0)
+                            .collect::<Vec<usize>>();
+                        dump(
+                            verts,
+                            indices,
+                            &source,
+                            &idx0,
+                            "PanicOnSplit1".to_string(),
+                            "ChildLeft",
+                        );
+
+                        let idx1 = idx_list
+                            .iter()
+                            .cloned()
+                            .filter(|idx| source[*idx].taken_by == idxs.1)
+                            .collect::<Vec<usize>>();
+                        dump(
+                            verts,
+                            indices,
+                            &source,
+                            &idx1,
+                            "PanicOnSplit2".to_string(),
+                            "ChildRight",
+                        );
                         panic!(
                             "\
                             Not sure if this is an error... this is here temporarily1.\
@@ -577,15 +622,19 @@ fn split<'a>(
                 } else if can_steal_right {
                     if let Some(check_idx) = stealable_right.pop() {
                         let check_idx = check_idx;
+                        // this touching check ensures stealing doesn't destroy connectivity in the other mesh
                         let mut touching = 0;
 
                         let connections =
                             unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
                         // connections is relative to the SOURCE SOURCE not the specific algo mesh...
                         for connection in &connections {
-                            let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
-                            if connected_tri.taken_by == idxs.1 {
-                                touching += 1;
+                            if *connection != usize::MAX {
+                                let connected_tri =
+                                    unsafe { source[*connection].as_ref_unchecked() };
+                                if connected_tri.taken_by == idxs.1 {
+                                    touching += 1;
+                                }
                             }
                         }
 
@@ -595,7 +644,71 @@ fn split<'a>(
 
                         check_idx
                     } else {
-                        panic!("Not sure if this is an error... this is here temporarily3.");
+                        let source = source
+                            .iter()
+                            .map(|v| unsafe { **v.as_ref_unchecked() })
+                            .collect::<Vec<Triangle>>();
+
+                        dump(
+                            verts,
+                            indices,
+                            &source,
+                            &idx_list,
+                            "PanicOnParent".to_string(),
+                            "parent",
+                        );
+
+                        let idx0 = idx_list
+                            .iter()
+                            .cloned()
+                            .filter(|idx| source[*idx].taken_by == idxs.0)
+                            .collect::<Vec<usize>>();
+                        dump(
+                            verts,
+                            indices,
+                            &source,
+                            &idx0,
+                            "PanicOnSplit1".to_string(),
+                            "ChildLeft",
+                        );
+
+                        let idx1 = idx_list
+                            .iter()
+                            .cloned()
+                            .filter(|idx| source[*idx].taken_by == idxs.1)
+                            .collect::<Vec<usize>>();
+                        dump(
+                            verts,
+                            indices,
+                            &source,
+                            &idx1,
+                            "PanicOnSplit2".to_string(),
+                            "ChildRight",
+                        );
+                        panic!(
+                            "\
+                            Not sure if this is an error... this is here temporarily3.\
+                            \nConsumed: {} {}\
+                            \nTo Check: {} {}\
+                            \nStealable: {} {}\
+                            \nTargets: {} {}\
+                            \nRemaining: {} {}\
+                            \nCan Steal left: {} {} {} {}",
+                            consumed_left,
+                            consumed_right,
+                            to_check_left.len(),
+                            to_check_right.len(),
+                            stealable_left.len(),
+                            stealable_right.len(),
+                            split_size,
+                            idx_list.len() - split_size,
+                            remaining_left,
+                            remaining_right,
+                            can_steal_right,
+                            remaining_right > 0,
+                            to_check_right.is_empty(),
+                            remaining_left == 0
+                        );
                     }
                 } else {
                     panic!(
@@ -755,17 +868,20 @@ fn split<'a>(
                 let connections = unsafe { source[*tri_idx].as_ref_unchecked().connections };
                 let mut manifold = false;
                 for connection in &connections {
-                    let conn_taken_by = unsafe { source[*connection].as_ref_unchecked().taken_by };
-                    if conn_taken_by == idxs.0 {
-                        manifold = true;
-                    }
+                    if *connection != usize::MAX {
+                        let conn_taken_by =
+                            unsafe { source[*connection].as_ref_unchecked().taken_by };
+                        if conn_taken_by == idxs.0 {
+                            manifold = true;
+                        }
 
-                    // if tris_in_collection.contains(connection) {
-                    //     manifold = true; // ensure at least one connection to the rest of the cluster
-                    //     assert_eq!(conn_taken_by, idxs.0);
-                    //     let internal_idx = src_to_split_idx.get(connection).unwrap();
-                    //     assert!(*internal_idx < split_size);
-                    // }
+                        // if tris_in_collection.contains(connection) {
+                        //     manifold = true; // ensure at least one connection to the rest of the cluster
+                        //     assert_eq!(conn_taken_by, idxs.0);
+                        //     let internal_idx = src_to_split_idx.get(connection).unwrap();
+                        //     assert!(*internal_idx < split_size);
+                        // }
+                    }
                 }
 
                 if !manifold {
@@ -779,6 +895,7 @@ fn split<'a>(
                         &source5,
                         idx_list,
                         "ManifoldFail_Parent".to_string(),
+                        "parent",
                     );
                     let child0 = idx_list
                         .iter()
@@ -800,6 +917,7 @@ fn split<'a>(
                         &source5,
                         &child0,
                         "ManifoldFail_Child0".to_string(),
+                        "childleft",
                     );
                     dump(
                         verts,
@@ -807,6 +925,7 @@ fn split<'a>(
                         &source5,
                         &child1,
                         "ManifoldFail_Child1".to_string(),
+                        "childright",
                     );
                 }
 

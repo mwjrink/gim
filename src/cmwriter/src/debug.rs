@@ -46,6 +46,7 @@ pub fn dump(
     tris: &[Triangle],
     cluster: &[usize],
     path_addition: impl Into<Option<String>>,
+    obj_id: &str,
 ) {
     // Save host visible framebuffer image to disk (ppm format)
     let path = if let Some(addition) = path_addition.into() {
@@ -63,7 +64,7 @@ pub fn dump(
         .open(path)
         .unwrap();
 
-    file.write(format!("o DebugDump\n",).as_bytes());
+    file.write(format!("o DebugDump{}\n", obj_id).as_bytes());
 
     for vert in src {
         file.write(

@@ -74,12 +74,11 @@ pub fn write(mesh: &mut Mesh) -> CTree {
     let mut nodes = Vec::new();
     let mut clusters = Vec::new();
 
-    dump_raw(mesh, "RAW".to_string());
+    // dump_raw(mesh, "RAW".to_string());
 
     // let mut maximum = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
     // let mut minimum = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
 
-    // construct algo mesh
     let mut algo_mesh = AlgoMesh {
         triangles: {
             mesh.indices
@@ -238,32 +237,47 @@ pub fn write(mesh: &mut Mesh) -> CTree {
     // start splitting
     {
         let mut idx_list: Vec<usize> = (0..algo_mesh.triangles.len()).collect();
-        println!("Dumping...");
-        dump(
-            &mesh.vertices,
-            &mesh.indices,
-            &algo_mesh.triangles,
-            &idx_list,
-            "Base".to_string(),
-        );
-        println!("dumped");
+        // println!("Dumping...");
+        // dump(
+        //     &mesh.vertices,
+        //     &mesh.indices,
+        //     &algo_mesh.triangles,
+        //     &idx_list,
+        //     "Base".to_string(),
+        // );
+        // println!("dumped");
 
         println!("Subdividing...");
-        let subsets = subdivide(
-            &mesh.indices,
-            &mesh.vertices,
-            &mut algo_mesh.triangles,
-            &mut idx_list,
-        );
+        let source = algo_mesh
+            .triangles
+            .iter_mut()
+            .map(|tri| UnsafeCell::new(tri))
+            .collect::<Vec<UnsafeCell<&mut Triangle>>>();
+        let subsets = subdivide(&mesh.indices, &mesh.vertices, &source, &mut idx_list);
         println!("Done subdividing.");
 
         let mut not_equal = 0;
-        for subset in &subsets {
+        for (idx, subset) in subsets.iter().enumerate() {
             if subset.idx_list.len() < TRIS_IN_CLUSTER && subset.idx_list.len() > 0 {
+                dump(
+                    &mesh.vertices,
+                    &mesh.indices,
+                    &algo_mesh.triangles,
+                    subset.idx_list,
+                    format!("final_degen_{}", idx).to_string(),
+                );
                 not_equal += 1;
             } else if subset.idx_list.len() > TRIS_IN_CLUSTER {
                 println!("subset has: {} triangles", idx_list.len());
                 panic!("Splitting failed!");
+            } else {
+                dump(
+                    &mesh.vertices,
+                    &mesh.indices,
+                    &algo_mesh.triangles,
+                    subset.idx_list,
+                    format!("final_{}", idx).to_string(),
+                );
             }
         }
         assert!(not_equal <= 1);
@@ -297,16 +311,12 @@ pub fn write(mesh: &mut Mesh) -> CTree {
 fn subdivide<'a>(
     indices: &[u32],
     verts: &[Vertex],
-    source: &'a mut [Triangle],
+    source: &[UnsafeCell<&mut Triangle>],
     idx_list: &'a mut [usize],
 ) -> Vec<AlgoMeshSubset<'a>> {
     let mut subsets = Vec::with_capacity(source.len() / TRIS_IN_CLUSTER + 1);
 
     let mut splittable = VecDeque::new();
-    let source = source
-        .iter_mut()
-        .map(|tri| UnsafeCell::new(tri))
-        .collect::<Vec<UnsafeCell<&mut Triangle>>>();
     splittable.push_back(AlgoMeshSubset { idx_list: idx_list });
     loop {
         if let Some(to_split) = splittable.pop_back() {
@@ -314,6 +324,12 @@ fn subdivide<'a>(
             subsets.push(AlgoMeshSubset { idx_list: &mut [] });
             let idx1 = subsets.len();
             subsets.push(AlgoMeshSubset { idx_list: &mut [] });
+            println!(
+                "Splitting {} tris into subsets {} and {}.",
+                to_split.idx_list.len(),
+                idx0,
+                idx1
+            );
             let (split0, split1) = split(indices, verts, &source, to_split.idx_list, (idx0, idx1));
 
             // if split0.triangles.len() <= TRIS_IN_CLUSTER
@@ -424,59 +440,248 @@ fn split<'a>(
         // start from the lowest and go through, make sure everything is attached to it in some way
         // let mut settered = 0;
         // let mut to_check = VecDeque::new();
-        let mut to_check = BinaryHeap::new();
-        to_check.push(Reverse(0usize));
-        let mut consumed = 0;
+        let mut to_check_left = BinaryHeap::<Reverse<usize>>::new();
+        let mut stealable_left = BinaryHeap::<Reverse<usize>>::new();
+        let mut to_check_right = BinaryHeap::<usize>::new();
+        let mut stealable_right = BinaryHeap::<usize>::new();
+
+        to_check_left.push(Reverse(0usize));
+        to_check_right.push(idx_list.len() - 1);
+
+        let mut consumed_left = 0;
+        let mut consumed_right = 0;
+
         loop {
-            if consumed == split_size {
+            if consumed_left == split_size && (idx_list.len() - consumed_right) == split_size {
                 break;
             }
 
-            if let Some(check_idx) = to_check.pop() {
-                unsafe {
-                    if source[idx_list[check_idx.0]].as_ref_unchecked().taken_by != idxs.0 {
-                        source[idx_list[check_idx.0]].as_mut_unchecked().taken_by = idxs.0;
-                        consumed += 1;
+            let remaining_left = split_size - consumed_left;
+            let remaining_right = idx_list.len() - split_size - consumed_right;
+
+            let can_steal_left =
+                remaining_left > 0 && to_check_left.is_empty() && remaining_right == 0;
+            let can_steal_right =
+                remaining_right > 0 && to_check_right.is_empty() && remaining_left == 0;
+
+            if (remaining_left >= remaining_right && (!to_check_left.is_empty() || can_steal_left))
+                || (to_check_right.is_empty() && !can_steal_right)
+            {
+                let check_idx = if let Some(check_idx) = to_check_left.pop() {
+                    check_idx.0
+                } else if can_steal_left {
+                    if let Some(check_idx) = stealable_left.pop() {
+                        let check_idx = check_idx.0;
+                        let mut touching = 0;
+
+                        let connections =
+                            unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
+                        // connections is relative to the SOURCE SOURCE not the specific algo mesh...
+                        for connection in &connections {
+                            let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
+                            if connected_tri.taken_by == idxs.0 {
+                                touching += 1;
+                            }
+                        }
+
+                        if touching < 2 {
+                            continue;
+                        }
+
+                        check_idx
+                    } else {
+                        panic!(
+                            "\
+                            Not sure if this is an error... this is here temporarily1.\
+                            \nConsumed: {} {}\
+                            \nTo Check: {} {}\
+                            \nStealable: {} {}\
+                            \nTargets: {} {}\
+                            \nRemaining: {} {}\
+                            \nCan Steal left: {} {} {} {}",
+                            consumed_left,
+                            consumed_right,
+                            to_check_left.len(),
+                            to_check_right.len(),
+                            stealable_left.len(),
+                            stealable_right.len(),
+                            split_size,
+                            idx_list.len() - split_size,
+                            remaining_left,
+                            remaining_right,
+                            can_steal_left,
+                            consumed_left < split_size,
+                            to_check_left.is_empty(),
+                            (idx_list.len() - consumed_right) == split_size
+                        );
+                    }
+                } else {
+                    panic!(
+                        "\
+                        Not sure if this is an error... this is here temporarily2.\
+                        \nConsumed: {} {}\
+                        \nTo Check: {} {}\
+                        \nStealable: {} {}\
+                        \nTargets: {} {}\
+                        \nRemaining: {} {}\
+                        \nCan Steal left: {} {} {} {}",
+                        consumed_left,
+                        consumed_right,
+                        to_check_left.len(),
+                        to_check_right.len(),
+                        stealable_left.len(),
+                        stealable_right.len(),
+                        split_size,
+                        idx_list.len() - split_size,
+                        remaining_left,
+                        remaining_right,
+                        can_steal_left,
+                        consumed_left < split_size,
+                        to_check_left.is_empty(),
+                        (idx_list.len() - consumed_right) == split_size
+                    );
+                    // continue;
+                };
+
+                {
+                    let tri = unsafe { source[idx_list[check_idx]].as_mut_unchecked() };
+                    if tri.taken_by != idxs.0 && (tri.taken_by != idxs.1 || can_steal_left) {
+                        if tri.taken_by == idxs.1 {
+                            consumed_right -= 1;
+                        }
+
+                        tri.taken_by = idxs.0;
+                        consumed_left += 1;
                     } else {
                         // Assume we have already looked at this triangle
                         continue;
                     }
+                }
 
-                    let tri = source[idx_list[check_idx.0]].as_ref_unchecked();
-                    // connections is relative to the SOURCE SOURCE not the specific algo mesh...
-                    for connection in &tri.connections {
-                        if split_size == 1804800 {
-                            println!(
-                                "tri {} is connected to {}",
-                                idx_list[check_idx.0], connection
-                            );
-                        }
-                        if let Some(internal_idx) = src_to_split_idx.get(connection) {
-                            let connected_tri = source[*connection].as_ref_unchecked();
-                            if split_size == 1804800 {
-                                println!(
-                                    "taken_by on connection was: {} looking for {}",
-                                    connected_tri.taken_by, idxs.0
-                                );
-                            }
-                            if connected_tri.taken_by != idxs.0 {
-                                to_check.push(Reverse(*internal_idx));
-                            }
+                let connections =
+                    unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
+                // connections is relative to the SOURCE SOURCE not the specific algo mesh...
+                for connection in &connections {
+                    if let Some(internal_idx) = src_to_split_idx.get(connection) {
+                        let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
+                        if connected_tri.taken_by == idxs.1 {
+                            stealable_left.push(Reverse(*internal_idx));
+                        } else if connected_tri.taken_by != idxs.0 {
+                            to_check_left.push(Reverse(*internal_idx));
                         }
                     }
                 }
             } else {
-                let source = source
-                    .iter()
-                    .map(|v| unsafe { **v.as_ref_unchecked() })
-                    .collect::<Vec<Triangle>>();
-                dump(verts, indices, &source, idx_list, "Broken".to_string());
+                let check_idx = if let Some(check_idx) = to_check_right.pop() {
+                    check_idx
+                } else if can_steal_right {
+                    if let Some(check_idx) = stealable_right.pop() {
+                        let check_idx = check_idx;
+                        let mut touching = 0;
 
-                panic!(
-                    "We ran out of triangles to check! {} => {}",
-                    consumed, split_size
-                );
+                        let connections =
+                            unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
+                        // connections is relative to the SOURCE SOURCE not the specific algo mesh...
+                        for connection in &connections {
+                            let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
+                            if connected_tri.taken_by == idxs.1 {
+                                touching += 1;
+                            }
+                        }
+
+                        if touching < 2 {
+                            continue;
+                        }
+
+                        check_idx
+                    } else {
+                        panic!("Not sure if this is an error... this is here temporarily3.");
+                    }
+                } else {
+                    panic!(
+                        "\
+                        Not sure if this is an error... this is here temporarily4.\
+                        \nConsumed: {} {}\
+                        \nTo Check: {} {}\
+                        \nStealable: {} {}\
+                        \nTargets: {} {}\
+                        \nRemaining: {} {}\
+                        \nCan Steal left: {} {} {} {}",
+                        consumed_left,
+                        consumed_right,
+                        to_check_left.len(),
+                        to_check_right.len(),
+                        stealable_left.len(),
+                        stealable_right.len(),
+                        split_size,
+                        idx_list.len() - split_size,
+                        remaining_left,
+                        remaining_right,
+                        can_steal_right,
+                        remaining_right > 0,
+                        to_check_right.is_empty(),
+                        remaining_left == 0
+                    );
+                    // continue;
+                };
+
+                {
+                    let tri = unsafe { source[idx_list[check_idx]].as_mut_unchecked() };
+                    if tri.taken_by != idxs.1 && (tri.taken_by != idxs.0 || can_steal_right) {
+                        if tri.taken_by == idxs.0 {
+                            consumed_left -= 1;
+                        }
+
+                        tri.taken_by = idxs.1;
+                        consumed_right += 1;
+                    } else {
+                        // Assume we have already looked at this triangle
+                        continue;
+                    }
+                }
+
+                let connections =
+                    unsafe { source[idx_list[check_idx]].as_ref_unchecked().connections };
+                // connections is relative to the SOURCE SOURCE not the specific algo mesh...
+                for connection in &connections {
+                    if let Some(internal_idx) = src_to_split_idx.get(connection) {
+                        let connected_tri = unsafe { source[*connection].as_ref_unchecked() };
+                        if connected_tri.taken_by == idxs.0 {
+                            stealable_right.push(*internal_idx);
+                        } else if connected_tri.taken_by != idxs.1 {
+                            to_check_right.push(*internal_idx);
+                        }
+                    }
+                }
             }
+
+            // You can only steal IF you are not at your limit
+            //   & your queue is empty
+            //   & the other is at their limit
+            // That means I need a steal queue... right? for each side?
+
+            // TODO
+            // build from both sides.
+            // Just steal from each-other instead...
+
+            // } else {
+            //     // TODO we only check/verify that one side is contiguous. Need to do both?? How though...
+            //     // Do this same thing from both ends?
+            //     println!(
+            //         "We ran out of triangles to check ({} {})! {} => {}",
+            //         idxs.0, idxs.1, consumed, split_size
+            //     );
+            //     let source = source
+            //         .iter()
+            //         .map(|v| unsafe { **v.as_ref_unchecked() })
+            //         .collect::<Vec<Triangle>>();
+            //     dump(verts, indices, &source, idx_list, "Broken".to_string());
+
+            //     panic!(
+            //         "We ran out of triangles to check! {} => {}",
+            //         consumed, split_size
+            //     );
+            // }
         }
 
         unsafe {
@@ -495,33 +700,116 @@ fn split<'a>(
                 src_to_split_idx.insert(*value, idx);
             }
 
-            // TODO make sure there are asserts but non manifold should be impossble based on how we chose them.
+            // TODO make sure there are asserts BUT
+            // non manifold should be impossble based
+            // on how we chose triangles.
+
+            let mut left_idx = 0;
+            let mut right_idx = idx_list.len() - 1;
+
+            loop {
+                if left_idx == right_idx || left_idx == split_size {
+                    break;
+                }
+
+                let left_tri = unsafe { source[idx_list[left_idx]].as_ref_unchecked() };
+                let right_tri = unsafe { source[idx_list[right_idx]].as_ref_unchecked() };
+                if left_tri.taken_by != idxs.0 && right_tri.taken_by == idxs.0 {
+                    idx_list.swap(left_idx, right_idx);
+                } else if left_tri.taken_by == idxs.0 {
+                    left_idx += 1;
+                } else if right_tri.taken_by != idxs.0 {
+                    right_idx -= 1;
+                } else {
+                    panic!("Not sure how we got here...");
+                }
+            }
+
+            // let mut tris_in_collection = HashSet::new();
             let mut count = 0;
-            let mut tris_in_collection = HashSet::new();
             for tri_idx in idx_list.iter() {
                 let tri = unsafe { source[*tri_idx].as_ref_unchecked() };
                 if tri.taken_by == idxs.0 {
-                    tris_in_collection.insert(tri_idx);
+                    // tris_in_collection.insert(tri_idx);
                     count += 1;
                 } else if count < split_size {
-                    // here we just need to swap some values around. It looks nearly perfect otherwise.
                     panic!("The clusters are non contiguous, splitting would fail.");
                 }
             }
             assert_eq!(count, split_size);
 
-            for tri_idx in idx_list[0..split_size].iter() {
-                let tri = unsafe { source[*tri_idx].as_ref_unchecked() };
-                let mut manifold = false;
-                for connection in &tri.connections {
-                    let connected = unsafe { source[*connection].as_ref_unchecked() };
-                    if tris_in_collection.contains(connection) {
-                        manifold = true; // ensure at least one connection to the rest of the cluster
-                        assert_eq!(connected.taken_by, idxs.0);
-                        let internal_idx = src_to_split_idx.get(connection).unwrap();
-                        assert!(*internal_idx < split_size);
-                    }
+            for (idx, src_idx) in idx_list.iter().enumerate().rev() {
+                let tri_taken_by = unsafe { source[*src_idx].as_ref_unchecked().taken_by };
+
+                if tri_taken_by == idxs.0 {
+                    panic!("Our cluster is leaking!");
                 }
+
+                if idx <= split_size {
+                    break;
+                }
+            }
+
+            #[cfg(debug_assertions)]
+            for tri_idx in idx_list[0..split_size].iter() {
+                let connections = unsafe { source[*tri_idx].as_ref_unchecked().connections };
+                let mut manifold = false;
+                for connection in &connections {
+                    let conn_taken_by = unsafe { source[*connection].as_ref_unchecked().taken_by };
+                    if conn_taken_by == idxs.0 {
+                        manifold = true;
+                    }
+
+                    // if tris_in_collection.contains(connection) {
+                    //     manifold = true; // ensure at least one connection to the rest of the cluster
+                    //     assert_eq!(conn_taken_by, idxs.0);
+                    //     let internal_idx = src_to_split_idx.get(connection).unwrap();
+                    //     assert!(*internal_idx < split_size);
+                    // }
+                }
+
+                if !manifold {
+                    let source5 = source
+                        .iter()
+                        .map(|v| unsafe { **v.as_ref_unchecked() })
+                        .collect::<Vec<Triangle>>();
+                    dump(
+                        verts,
+                        indices,
+                        &source5,
+                        idx_list,
+                        "ManifoldFail_Parent".to_string(),
+                    );
+                    let child0 = idx_list
+                        .iter()
+                        .filter(|idx| unsafe {
+                            source[**idx].as_ref_unchecked().taken_by == idxs.0
+                        })
+                        .cloned()
+                        .collect::<Vec<usize>>();
+                    let child1 = idx_list
+                        .iter()
+                        .filter(|idx| unsafe {
+                            source[**idx].as_ref_unchecked().taken_by == idxs.1
+                        })
+                        .cloned()
+                        .collect::<Vec<usize>>();
+                    dump(
+                        verts,
+                        indices,
+                        &source5,
+                        &child0,
+                        "ManifoldFail_Child0".to_string(),
+                    );
+                    dump(
+                        verts,
+                        indices,
+                        &source5,
+                        &child1,
+                        "ManifoldFail_Child1".to_string(),
+                    );
+                }
+
                 assert!(manifold);
             }
         };
@@ -544,12 +832,12 @@ fn split<'a>(
             };
         }
 
-        let source = source
-            .iter()
-            .map(|v| unsafe { **v.as_ref_unchecked() })
-            .collect::<Vec<Triangle>>();
-        dump(verts, indices, &source, split_tris0, idxs.0.to_string());
-        dump(verts, indices, &source, split_tris1, idxs.1.to_string());
+        // let source = source
+        //     .iter()
+        //     .map(|v| unsafe { **v.as_ref_unchecked() })
+        //     .collect::<Vec<Triangle>>();
+        // dump(verts, indices, &source, split_tris0, idxs.0.to_string());
+        // dump(verts, indices, &source, split_tris1, idxs.1.to_string());
 
         let split0 = AlgoMeshSubset {
             idx_list: split_tris0,

@@ -286,6 +286,7 @@ fn subdivide(
             0
         }
     };
+    // new idea, simultaneous growing, try to enforce hexagons/honeycomb tiling
 
     let add_new_potentials = |tri: &Triangle,
                               anchor: Vec3,

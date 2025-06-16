@@ -1,13 +1,9 @@
-use crate::debug::{dump_clusters, dump_part};
+use crate::debug::dump_part;
 use crate::*;
 use foldhash::{HashMap, HashMapExt};
-use foldhash::{HashSet, HashSetExt};
 use interop::TRIS_IN_CLUSTER;
-use std::cell::UnsafeCell;
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 use std::usize;
-use ultraviolet::{f32x8, Vec3, Vec3x8};
+use ultraviolet::Vec3;
 
 pub fn write(mesh: &mut Mesh) -> CTree {
     let mut nodes = Vec::new();
@@ -19,6 +15,9 @@ pub fn write(mesh: &mut Mesh) -> CTree {
         triangles: {
             mesh.indices
                 .chunks(3)
+                // .filter(|chunk| {
+                //     chunk[0] != chunk[1] && chunk[0] != chunk[2] && chunk[1] != chunk[2]
+                // })
                 .enumerate()
                 .map(|(idx, chunk)| {
                     let vert0 = mesh.vertices[chunk[0] as usize];
@@ -76,6 +75,18 @@ pub fn write(mesh: &mut Mesh) -> CTree {
                             &mesh.indices[(adjacent.idx * 3)..=(adjacent.idx * 3 + 2)];
                         for (connection_idx, vert_idx) in tri_indices.iter().enumerate() {
                             if *vert_idx == edge[0] {
+                                // these are degenerate triangles, two verts are the same
+                                if adjacent.connections[connection_idx] != usize::MAX
+                                    && tri_idx != *adjacent_idx
+                                {
+                                    panic!();
+                                } else if adjacent.connections[connection_idx] != usize::MAX
+                                    && tri_idx == *adjacent_idx
+                                {
+                                    set_connection = true;
+                                    continue;
+                                }
+
                                 assert_eq!(adjacent.connections[connection_idx], usize::MAX);
                                 adjacent.connections[connection_idx] = tri_idx;
                                 set_connection = true;
@@ -197,10 +208,10 @@ pub fn write(mesh: &mut Mesh) -> CTree {
         let parts_num =
             unsafe { (desired as f32 * (1.0 + 0.01 * deviation as f32)).to_int_unchecked() };
         // let desired = TRIS_IN_CLUSTER as i32;
-        let graph = metis::Graph::new(10, parts_num, &xadj, &adj)
+        let graph = metis::Graph::new(1, parts_num, &xadj, &adj)
             .unwrap()
             // .set_option(metis::option::Contig(true))
-            .set_option(metis::option::ObjType::Cut)
+            .set_option(metis::option::ObjType::Vol)
             .set_option(metis::option::IpType::Grow)
             .set_option(metis::option::UFactor(deviation))
             // .set_option(metis::option::MinConn(true))

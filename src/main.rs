@@ -3,8 +3,8 @@ use interop::Vertex;
 use ultraviolet::Vec3;
 
 fn main() {
-    // let obj_file = "input/xyzrgb_dragon/xyzrgb_dragon.obj";
-    let obj_file = "input/lucy/lucy.obj";
+    let obj_file = "input/xyzrgb_dragon/xyzrgb_dragon.obj";
+    // let obj_file = "input/lucy/lucy.obj";
     // let obj_file = "input/bunny/bunny.obj";
 
     // let obj_file = "input/cube.obj";

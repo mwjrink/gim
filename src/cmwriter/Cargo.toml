@@ -12,3 +12,5 @@ interop = { path = "../interop" }
 ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
 foldhash = "0.1.5"
 metis = { version = "0.2.2", features = ["vendored"] }
+graph = "0.3.1"
+graph_builder = "0.4.1"

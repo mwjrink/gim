@@ -1,8 +1,9 @@
 use crate::debug::dump_part;
 use crate::*;
 use foldhash::{HashMap, HashMapExt};
+use graph_builder::prelude::*;
 use interop::TRIS_IN_CLUSTER;
-use std::usize;
+use std::{u32, usize};
 use ultraviolet::Vec3;
 
 pub fn write(mesh: &mut Mesh) -> CTree {
@@ -187,55 +188,47 @@ pub fn write(mesh: &mut Mesh) -> CTree {
         // let mut partmesh = vec![0i64; algo_mesh.triangles.len()];
         // mesh.part_dual(epart, npart);
         // mesh.part_nodal(epart, npart);
-        let mut adj = Vec::with_capacity(mesh.indices.len());
-        let mut xadj = Vec::with_capacity(mesh.indices.len() / 3);
 
-        xadj.push(0);
-        let mut num_connections = 0;
-        for tri in &algo_mesh.triangles {
-            for connection in &tri.connections {
-                if *connection != usize::MAX {
-                    adj.push(*connection as i32);
-                    num_connections += 1;
-                }
-            }
-            xadj.push(num_connections);
-        }
+        let edges = algo_mesh
+            .triangles
+            .iter()
+            .enumerate()
+            .flat_map(|(idx, tri)| {
+                tri.connections
+                    .iter()
+                    .map(move |connected| (idx, *connected))
+            });
+        let graph: UndirectedCsrGraph<usize> = GraphBuilder::new()
+            .csr_layout(CsrLayout::Unsorted)
+            .edges(edges)
+            .build();
+        let desired = algo_mesh.triangles.len() / TRIS_IN_CLUSTER + 1;
+        let result = graph.degree_partition(desired);
 
-        // the -1 keeps this in the range of 126 - 128
-        let deviation = 1;
-        let desired = (algo_mesh.triangles.len() / (TRIS_IN_CLUSTER - deviation as usize)) as i32;
-        let parts_num =
-            unsafe { (desired as f32 * (1.0 + 0.01 * deviation as f32)).to_int_unchecked() };
-        // let desired = TRIS_IN_CLUSTER as i32;
-        let graph = metis::Graph::new(1, parts_num, &xadj, &adj)
-            .unwrap()
-            // .set_option(metis::option::Contig(true))
-            .set_option(metis::option::ObjType::Vol)
-            .set_option(metis::option::IpType::Grow)
-            .set_option(metis::option::UFactor(deviation))
-            // .set_option(metis::option::MinConn(true))
-            // .set_option(metis::option::ObjType::Vol)
-            .set_option(metis::option::PType::Kway);
-
-        let mut part = vec![0; algo_mesh.triangles.len()];
-        let cut = graph.part_kway(&mut part).unwrap();
         // let cut = graph.part_recursive(&mut part).unwrap();
-        println!("Desired: {}", desired);
-        println!("Cut: {}", cut);
-        let num_parts = *part.iter().max().unwrap() as usize + 1;
-        println!("Part: {:?}", num_parts);
-        let mut clusters = vec![Vec::with_capacity(TRIS_IN_CLUSTER); num_parts];
+        println!("Result: {}", result.len());
+        // let mut clusters = vec![Vec::with_capacity(TRIS_IN_CLUSTER); num_parts];
 
-        for (tri_idx, cluster_idx) in part.iter().enumerate() {
-            clusters[*cluster_idx as usize].push(tri_idx);
-            algo_mesh.triangles[tri_idx].owned_by = *cluster_idx as usize;
-        }
+        // for (tri_idx, cluster_idx) in result.iter().enumerate() {
+        //     clusters[*cluster_idx as usize].push(tri_idx);
+        //     algo_mesh.triangles[tri_idx].owned_by = *cluster_idx as usize;
+        // }
 
         let mut num_degen = 0;
         let mut num_exact = 0;
         let mut num_fat = 0;
-        for (idx, cluster) in clusters.iter().enumerate() {
+        let mut min_tris = usize::MAX;
+        let mut max_tris = 0;
+        for (idx, cluster) in result.iter().enumerate() {
+            if cluster.len() < min_tris {
+                if cluster.len() != 0 {
+                    min_tris = cluster.len();
+                }
+            }
+            if cluster.len() > max_tris {
+                max_tris = cluster.len();
+            }
+
             if cluster.len() < TRIS_IN_CLUSTER {
                 // println!(
                 //     "{} is a degenerate cluster with {} tris",
@@ -261,8 +254,8 @@ pub fn write(mesh: &mut Mesh) -> CTree {
             }
         }
         println!(
-            "\n Degen: {}\n Fat: {}\n Exact: {}",
-            num_degen, num_fat, num_exact
+            "\n Degen: {}\n Fat: {}\n Exact: {}\n Min: {}\n Max: {}",
+            num_degen, num_fat, num_exact, min_tris, max_tris
         );
 
         println!("Done subdividing.");
@@ -270,8 +263,8 @@ pub fn write(mesh: &mut Mesh) -> CTree {
         dump_part(
             &mesh.vertices,
             &algo_mesh.triangles,
-            &clusters,
-            "METISKWay".to_string(),
+            &result,
+            "graphrs".to_string(),
         );
         println!("Done dumping.");
 

@@ -11,3 +11,5 @@ edition = "2021"
 interop = { path = "../interop" }
 ultraviolet = { version = "0.10.0", features = ["bytemuck"] }
 foldhash = "0.1.5"
+wrgpgpu = "0.1.4"
+swait = "0.1.2"
